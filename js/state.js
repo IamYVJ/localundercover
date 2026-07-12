@@ -41,6 +41,7 @@ export class GameEngine {
     this.winner = null;   // 'civilians' | 'undercover' | 'mrwhite'
     this.result = null;   // { winner, reason }
     this.log = [];
+    this.history = [];    // per-round recap: [{ round, eliminated, tally, ballots, ... }]
   }
 
   // ---- helpers ------------------------------------------------------------
@@ -182,6 +183,7 @@ export class GameEngine {
     this.winner = null;
     this.result = null;
     this.log = [];
+    this.history = [];
     this.phase = PHASES.ROLE_REVEAL;
     this._log('Roles dealt. Everyone, peek at your secret word.');
     return { ok: true };
@@ -319,9 +321,36 @@ export class GameEngine {
 
   _noElimination(tally) {
     this.reveal = { type: 'none', eliminated: null, tally };
+    this._recordHistory({ eliminated: null, tally, random: false });
     this.vote = null;
     this.phase = PHASES.REVEAL;
     this._log('The vote was tied — no one is eliminated this round.');
+  }
+
+  // Snapshot the round's outcome + who-voted-for-whom for the post-game recap.
+  // Must run while this.vote still holds the deciding ballots (before it's cleared).
+  _recordHistory({ eliminated, tally, random }) {
+    const ballots = this.vote
+      ? Object.entries(this.vote.ballots).map(([voter, target]) => ({
+          voter: this.getPlayer(voter)?.name || '—',
+          target: this.getPlayer(target)?.name || '—',
+        }))
+      : [];
+    const runoff = !!(this.vote && (this.vote.round === 'runoff' || this.vote.runoffCount > 0));
+    this.history.push({
+      round: this.round,
+      eliminated: eliminated || null, // { name, role } | null
+      tally: (tally || []).map((t) => ({ name: t.name, votes: t.votes })),
+      ballots,
+      random: !!random,
+      runoff,
+    });
+  }
+
+  // Fold Mr. White's guess into the round where they were voted out.
+  _attachWhiteGuess(name, guess, correct) {
+    const last = this.history[this.history.length - 1];
+    if (last) last.whiteGuess = { name, guess: guess || '', correct: !!correct };
   }
 
   _eliminate(id, tally, random = false) {
@@ -334,6 +363,7 @@ export class GameEngine {
       tally,
       random,
     };
+    this._recordHistory({ eliminated: { name: p.name, role: p.roleId }, tally, random });
     this.vote = null;
     this.phase = PHASES.REVEAL;
     const roleName = describeRole(p.roleId).name;
@@ -369,6 +399,7 @@ export class GameEngine {
     }
     if (wordsMatch(guess, this.words.civilianWord)) {
       this.whiteGuess.guess = String(guess).trim();
+      this._attachWhiteGuess(this.whiteGuess.whiteName, this.whiteGuess.guess, true);
       this._endGame('mrwhite', `Mr. White guessed the word — “${this.words.civilianWord}”. Mr. White steals the win!`);
       return { ok: true, correct: true };
     }
@@ -376,6 +407,7 @@ export class GameEngine {
     this.whiteGuess.guess = String(guess).trim();
     const wp = this.getPlayer(actorId);
     if (wp) wp.guessedWrong = true;
+    this._attachWhiteGuess(this.whiteGuess.whiteName, this.whiteGuess.guess, false);
     this._log(`Mr. White guessed “${String(guess).trim()}” — wrong.`);
     this._winCheckAndAdvance();
     return { ok: true, correct: false };
@@ -387,6 +419,7 @@ export class GameEngine {
     this.whiteGuess.wrong = true;
     const wp = this.getPlayer(this.whiteGuess.whiteId);
     if (wp) wp.guessedWrong = true;
+    this._attachWhiteGuess(this.whiteGuess.whiteName, '', false);
     this._log('Mr. White did not guess.');
     this._winCheckAndAdvance();
     return { ok: true };
@@ -434,6 +467,7 @@ export class GameEngine {
     this.whiteGuess = null;
     this.winner = null;
     this.result = null;
+    this.history = [];
     this.phase = PHASES.LOBBY;
     this._reclampConfig();
     return { ok: true };
@@ -445,7 +479,7 @@ export class GameEngine {
       phase: this.phase, hostId: this.hostId, players: this.players, config: this.config,
       words: this.words, round: this.round, speaking: this.speaking, vote: this.vote,
       reveal: this.reveal, whiteGuess: this.whiteGuess, winner: this.winner, result: this.result,
-      log: this.log,
+      log: this.log, history: this.history,
     });
   }
 
@@ -526,6 +560,8 @@ export class GameEngine {
         reason: this.result ? this.result.reason : '',
         words: this.words, // reveal both words at the end
         whiteGuess: this.whiteGuess,
+        history: this.history, // round-by-round recap
+
         players: this.players.map((p) => ({
           id: p.id, name: p.name, role: p.roleId, word: p.word,
           alive: p.alive, guessedWrong: p.guessedWrong,

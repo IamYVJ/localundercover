@@ -343,5 +343,98 @@ function firstCivAlive(g) { return g.alivePlayers().find((p) => p.roleId === ROL
 }
 
 // ===========================================================================
+// RECAP HISTORY
+// ===========================================================================
+
+// Each vote round is recorded with its outcome, tally, and ballots.
+{
+  const g = setup(4, { undercover: 1, mrwhite: 0 }, 3);
+  readyAll(g);
+  describeAll(g);
+  const uc = roleId(g, ROLES.UNDERCOVER);
+  voteOut(g, uc);
+  g.continueAfterReveal(g.hostId);
+  eq(g.phase, PHASES.GAMEOVER, 'recap: reached gameover');
+  eq(g.history.length, 1, 'recap: one round recorded');
+  const h0 = g.history[0];
+  eq(h0.round, 1, 'recap: round number captured');
+  eq(h0.eliminated.role, ROLES.UNDERCOVER, 'recap: undercover recorded as eliminated');
+  ok(h0.tally.length > 0, 'recap: tally captured');
+  eq(h0.ballots.length, g.players.length, 'recap: a ballot per voter');
+  ok(h0.ballots.every((b) => b.voter && b.target), 'recap: ballots name voter + target');
+  eq(g.publicState().final.history.length, 1, 'recap: exposed via public final state');
+}
+
+// A multi-round game records one entry per vote round, in order.
+{
+  const g = setup(4, { undercover: 1, mrwhite: 0 }, 5);
+  readyAll(g);
+  describeAll(g);
+  voteOut(g, firstCivAlive(g));
+  g.continueAfterReveal(g.hostId);
+  describeAll(g);
+  voteOut(g, firstCivAlive(g));
+  g.continueAfterReveal(g.hostId);
+  eq(g.phase, PHASES.GAMEOVER, 'recap multi: gameover on parity');
+  eq(g.history.length, 2, 'recap multi: two rounds recorded');
+  eq(g.history[0].eliminated.role, ROLES.CIVILIAN, 'recap multi: round 1 civilian out');
+  eq(g.history[1].eliminated.role, ROLES.CIVILIAN, 'recap multi: round 2 civilian out');
+  eq(g.history[1].round, 2, 'recap multi: second entry is round 2');
+}
+
+// Mr. White's correct guess is folded into the round they were voted out.
+{
+  const g = setup(5, { undercover: 1, mrwhite: 1 }, 9);
+  readyAll(g);
+  const wh = roleId(g, ROLES.MRWHITE);
+  describeAll(g);
+  voteOut(g, wh);
+  g.continueAfterReveal(g.hostId);
+  g.submitWhiteGuess(wh, g.words.civilianWord);
+  const last = g.history[g.history.length - 1];
+  eq(last.eliminated.role, ROLES.MRWHITE, 'recap: that round eliminated Mr. White');
+  ok(last.whiteGuess && last.whiteGuess.correct, 'recap: correct white guess folded in');
+  eq(last.whiteGuess.guess, g.words.civilianWord, 'recap: white guess text captured');
+}
+
+// A wrong Mr. White guess is recorded as incorrect.
+{
+  const g = setup(6, { undercover: 1, mrwhite: 1 }, 13);
+  readyAll(g);
+  const wh = roleId(g, ROLES.MRWHITE);
+  describeAll(g);
+  voteOut(g, wh);
+  g.continueAfterReveal(g.hostId);
+  g.submitWhiteGuess(wh, 'definitely-not-the-word');
+  const wgRound = g.history.find((h) => h.eliminated && h.eliminated.role === ROLES.MRWHITE);
+  ok(wgRound.whiteGuess && !wgRound.whiteGuess.correct, 'recap: wrong white guess recorded');
+}
+
+// A tied round with NONE tiebreak records a no-elimination entry.
+{
+  const g = setup(4, { undercover: 1, mrwhite: 0, tieBreak: TIE_BREAK.NONE }, 4);
+  readyAll(g);
+  describeAll(g);
+  const [A, B, C, D] = g.alivePlayers().map((p) => p.id);
+  g.castVote(A, C); g.castVote(B, D); g.castVote(C, D); g.castVote(D, C); // 2-2 tie
+  eq(g.history.length, 1, 'recap: tie round recorded');
+  eq(g.history[0].eliminated, null, 'recap: no elimination stored as null');
+  eq(g.history[0].ballots.length, 4, 'recap: tie ballots captured');
+}
+
+// History survives serialize/restore and is cleared by playAgain.
+{
+  const g = setup(4, { undercover: 1, mrwhite: 0 }, 3);
+  readyAll(g);
+  describeAll(g);
+  voteOut(g, roleId(g, ROLES.UNDERCOVER));
+  g.continueAfterReveal(g.hostId);
+  const g2 = new GameEngine().restore(g.serialize());
+  eq(JSON.stringify(g2.history), JSON.stringify(g.history), 'recap: history round-trips through serialize');
+  g.playAgain(g.hostId);
+  eq(g.history.length, 0, 'recap: playAgain clears history');
+}
+
+// ===========================================================================
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

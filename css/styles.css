@@ -400,6 +400,15 @@ body {
   font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; color: var(--muted);
 }
 
+/* --- Gameover: round-by-round recap ------------------------------------- */
+.recap-round {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 0; border-bottom: 1px solid var(--border-soft);
+}
+.recap-round:last-child { border-bottom: none; }
+.recap-head { display: flex; align-items: center; gap: 10px; }
+.recap-head .pname { flex: 1 1 auto; font-weight: 500; }
+
 /* --- Gameover: word reveal ---------------------------------------------- */
 .words-reveal { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .word-chip {

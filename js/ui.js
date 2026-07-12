@@ -531,6 +531,8 @@ function gameoverScreen(app, intents) {
         el('div', { class: 'card-label' }, 'Undercover'),
         el('div', { class: 'secret-word uc', style: 'font-size:24px' }, f.words ? f.words.undercoverWord : '—')))));
 
+  if (f.history && f.history.length) wrap.appendChild(recapCard(f.history));
+
   const list = el('ul', { class: 'player-list' });
   (f.players || []).forEach((p) => {
     const role = describeRole(p.role);
@@ -550,6 +552,41 @@ function gameoverScreen(app, intents) {
   }
   wrap.appendChild(el('button', { class: 'btn btn-ghost btn-block', onclick: () => intents.leave() }, 'Leave'));
   return wrap;
+}
+
+// A round-by-round summary: who was voted out, the tally, and who voted whom.
+function recapCard(history) {
+  const rounds = history.map((h) => {
+    const role = h.eliminated ? describeRole(h.eliminated.role) : null;
+    const title = h.eliminated
+      ? `${h.eliminated.name} voted out${h.random ? ' (random)' : ''}`
+      : 'No one eliminated (tie)';
+    const tallyText = (h.tally || []).filter((t) => t.votes > 0)
+      .map((t) => `${t.name} ${t.votes}`).join(' · ');
+    const votesText = (h.ballots || []).map((b) => `${b.voter} → ${b.target}`).join(', ');
+
+    let whiteLine = null;
+    if (h.whiteGuess) {
+      const wg = h.whiteGuess;
+      whiteLine = el('div', { class: 'fine warn' },
+        wg.correct
+          ? `Mr. White (${wg.name}) guessed “${wg.guess}” — correct!`
+          : (wg.guess
+              ? `Mr. White (${wg.name}) guessed “${wg.guess}” — wrong`
+              : `Mr. White (${wg.name}) didn’t guess`));
+    }
+
+    return el('div', { class: 'recap-round' },
+      el('div', { class: 'recap-head' },
+        el('span', { class: 'turn-num' }, String(h.round)),
+        el('span', { class: 'pname' }, title),
+        role ? el('span', { class: 'pill ' + role.color }, role.name) : null),
+      tallyText ? el('div', { class: 'fine' }, 'Tally: ' + tallyText) : null,
+      votesText ? el('div', { class: 'fine' }, votesText) : null,
+      whiteLine);
+  });
+  return el('div', { class: 'card' },
+    el('div', { class: 'card-label' }, 'Round by round'), ...rounds);
 }
 
 // ---------------------------------------------------------------------------
