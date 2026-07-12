@@ -11,6 +11,7 @@ import {
   PHASES, TIE_BREAK, TIMER, MIN_PLAYERS, MAX_PLAYERS, maxUndercover, describeRole,
 } from './rules.js';
 import { categoryOptions } from './words.js';
+import { serverConfigured } from './config.js';
 
 let _lastKey = '';
 let _ticker = null; // active countdown interval (only one alive at a time)
@@ -81,6 +82,22 @@ function homeScreen(app, intents) {
   wrap.appendChild(el('button', {
     class: 'btn btn-primary btn-block', onclick: () => intents.host(),
   }, 'Create game'));
+
+  // Server reachability, mirroring the in-room transport badge. Shown only when a
+  // server is configured at all; a pure peer-to-peer build renders nothing here.
+  if (serverConfigured()) {
+    const online = app.serverProbe === 'online';
+    const pending = app.serverProbe === 'pending';
+    wrap.appendChild(el('div', { style: 'display:flex;justify-content:center' },
+      el('span', {
+        class: 'pill' + (online ? ' accent' : ''),
+        title: online
+          ? 'The game server is reachable — you can host a room players join from anywhere.'
+          : pending
+            ? 'Checking whether the game server is reachable…'
+            : 'The game server is unreachable right now — only same-Wi-Fi games are available.',
+      }, online ? 'Server online' : pending ? 'Checking server…' : 'Server offline')));
+  }
 
   // Offered only when the game server answered its health probe. Peer-to-peer
   // stays the default (works offline on one Wi-Fi); the server lets players on
@@ -221,13 +238,29 @@ function roomScreen(app, intents) {
   }
 }
 
+// A small pill naming which transport the room is running on. Only meaningful
+// when a server is even configured — otherwise the app is pure peer-to-peer and
+// there's nothing to contrast, so we render nothing and the P2P-only UI is
+// unchanged. Returns null (which el() skips as a child) when there's no server.
+function transportBadge(app) {
+  if (!serverConfigured()) return null;
+  const onServer = app.mode === 'server';
+  return el('span', {
+    class: 'pill' + (onServer ? ' accent' : ''),
+    title: onServer
+      ? 'Hosted on the game server — players can join from anywhere.'
+      : 'Local peer-to-peer over your Wi-Fi.',
+  }, onServer ? 'On server' : 'LAN');
+}
+
 function roomHeader(app, kicker) {
-  const pub = app.pub;
   return el('div', {},
     el('div', { class: 'wordmark' },
       el('span', { class: 'wordmark-dot' }),
       kicker || 'UNDERCOVER',
-      el('span', { style: 'margin-left:auto;color:var(--accent)' }, 'ROOM ' + app.code)));
+      el('span', { style: 'margin-left:auto;display:inline-flex;align-items:center;gap:9px' },
+        transportBadge(app),
+        el('span', { style: 'color:var(--accent)' }, 'ROOM ' + app.code))));
 }
 
 function isHost(app) { return app.me && app.me.isHost; }
@@ -241,14 +274,18 @@ function lobbyScreen(app, intents) {
   const n = pub.players.length;
   const wrap = el('div', { class: 'field-group' });
 
+  const badge = transportBadge(app);
   wrap.appendChild(el('div', { class: 'wordmark' },
-    el('span', { class: 'wordmark-dot' }), 'ROOM CODE'));
+    el('span', { class: 'wordmark-dot' }), 'ROOM CODE',
+    badge ? el('span', { style: 'margin-left:auto' }, badge) : null));
   wrap.appendChild(el('div', {
     class: 'room-code', onclick: () => intents.copyCode(),
     title: 'Tap to copy',
   }, app.code || '····'));
   wrap.appendChild(el('p', { class: 'fine', style: 'text-align:center' },
-    'Share this code. Everyone joins on the same Wi-Fi. Tap the code to copy.'));
+    app.mode === 'server'
+      ? 'Share this code. Players can join from anywhere. Tap the code to copy.'
+      : 'Share this code. Everyone joins on the same Wi-Fi. Tap the code to copy.'));
   wrap.appendChild(el('button', {
     class: 'btn btn-secondary btn-block', onclick: () => intents.shareLink(),
   }, 'Share invite link'));

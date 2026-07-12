@@ -38,6 +38,7 @@ const app = {
   me: null,              // { id, name, isHost, clientId }
   mode: 'p2p',           // 'p2p' (WebRTC star) | 'server' (authoritative WS host)
   serverAvailable: false,// health probe said the game server is reachable
+  serverProbe: 'pending',// health probe status: 'pending' | 'online' | 'offline'
   triedP2PFallback: false,// a server join already fell back to peer-to-peer once
   code: '',
   pub: null,             // engine.publicState()
@@ -766,6 +767,7 @@ async function checkServerHealth() {
   } finally {
     clearTimeout(timer);
   }
+  app.serverProbe = app.serverAvailable ? 'online' : 'offline';
   if (app.screen === 'home') draw();
 }
 
