@@ -32,6 +32,7 @@ export function render(root, app, intents) {
   switch (app.screen) {
     case 'home':       node = homeScreen(app, intents); break;
     case 'connecting': node = connectingScreen(app, intents); break;
+    case 'duplicate':  node = duplicateScreen(app, intents); break;
     case 'room':       node = roomScreen(app, intents); break;
     case 'hostleft':   node = messageScreen('Disconnected', app.error || 'The game ended.', intents); break;
     case 'error':      node = messageScreen('Something went wrong', app.error || 'Unknown error.', intents); break;
@@ -156,6 +157,23 @@ function retryCountdownEl(app) {
   if (_ticker) { clearInterval(_ticker); _ticker = null; }
   _ticker = setInterval(tick, 250);
   return p;
+}
+
+// Shown when this device already has the game open in another tab. Two tabs
+// share one clientId and would fight over the same seat, so only one runs.
+function duplicateScreen(app, intents) {
+  return el('div', { class: 'field-group' },
+    el('div', { class: 'wordmark' }, el('span', { class: 'wordmark-dot' }), 'ALREADY OPEN'),
+    el('h1', { class: 'hero hero-sm' }, 'Open in another tab'),
+    el('p', { class: 'tagline' },
+      'Undercover is already running in another tab or window on this device — two at once would clash.'),
+    el('p', { class: 'fine', style: 'text-align:center' },
+      'Switch back to that tab to keep playing, or take over here (the other tab will stand down).'),
+    el('button', {
+      class: 'btn btn-primary btn-block',
+      disabled: app.dupBusy,
+      onclick: () => intents.useHere(),
+    }, app.dupBusy ? 'Taking over…' : 'Use this tab instead'));
 }
 
 function messageScreen(title, body, intents) {

@@ -32,7 +32,8 @@ const clientId = loadClientId();
 // Controller state (owned here, rendered by ui.js).
 // ---------------------------------------------------------------------------
 const app = {
-  screen: 'home',        // home | connecting | room | hostleft | error
+  screen: 'home',        // home | connecting | room | hostleft | error | duplicate
+  dupBusy: false,        // duplicate screen: takeover handoff in progress
   me: null,              // { id, name, isHost, clientId }
   code: '',
   pub: null,             // engine.publicState()
@@ -55,6 +56,8 @@ let reconnectTimer = null;
 let reconnectTries = 0; // consecutive automatic reconnect attempts so far
 let toastTimer = null;
 let turnTimer = null;   // host only: fires when a describe turn's time is up
+let tabChannel = null;    // BroadcastChannel for cross-tab takeover coordination
+let releaseTabLock = null; // call to give up this tab's exclusive lock
 
 // Reconnect backoff: start gentle, double each miss, cap the wait, and stop
 // after a bounded number of tries so a permanently-down broker doesn't spin
@@ -491,6 +494,19 @@ const intents = {
     scheduleReconnect();
     draw();
   },
+  useHere: () => {
+    // Take over the device from the other tab: nudge it to stand down, then
+    // block until its lock frees before resuming here. If the resumed session
+    // is a host, the peer re-creates from the engine snapshot, so the game
+    // survives the handoff (a short settle lets the broker free the room id).
+    if (app.dupBusy) return;
+    app.dupBusy = true;
+    draw();
+    if (tabChannel) { try { tabChannel.postMessage('takeover'); } catch (_) {} }
+    acquireTabLock({ wait: true }).then((held) => {
+      if (held) setTimeout(resumeOrHome, 500);
+    });
+  },
   showRules: () => { app.showRules = true; draw(); },
   hideRules: () => { app.showRules = false; draw(); },
   copyCode,
@@ -519,9 +535,48 @@ const intents = {
 };
 
 // ---------------------------------------------------------------------------
-// Boot — resume a prior session if one is still fresh.
+// Single-tab guard. Two tabs in the same browser share one clientId, so a
+// second tab would silently steal the first's seat (the host adopts the newest
+// connection for a given clientId). We hold an exclusive lock for this tab's
+// lifetime; a second tab can't get it and shows a "already open" screen. A
+// reload releases the lock instantly, so this never interferes with reconnects.
 // ---------------------------------------------------------------------------
-function boot() {
+const TAB_LOCK = 'localundercover.tab';
+
+function initTabChannel() {
+  if (tabChannel || typeof BroadcastChannel === 'undefined') return;
+  try {
+    tabChannel = new BroadcastChannel('localundercover.tabs');
+    tabChannel.onmessage = (e) => {
+      // Another tab is taking over this device — stand down so only one tab
+      // ever talks to the game at a time.
+      if (e.data === 'takeover' && releaseTabLock) {
+        teardown();
+        releaseTabLock(); releaseTabLock = null;
+        app.screen = 'duplicate';
+        app.dupBusy = false;
+        draw();
+      }
+    };
+  } catch (_) { tabChannel = null; }
+}
+
+// Resolves true if we hold the exclusive lock, false if another tab has it.
+// With { wait: true } it blocks until the lock is free instead of giving up.
+function acquireTabLock({ wait = false } = {}) {
+  return new Promise((resolve) => {
+    if (!navigator.locks || !navigator.locks.request) { resolve(true); return; }
+    const opts = wait ? {} : { ifAvailable: true };
+    navigator.locks.request(TAB_LOCK, opts, (lock) => {
+      if (!lock) { resolve(false); return; }        // held elsewhere (ifAvailable)
+      resolve(true);
+      return new Promise((release) => { releaseTabLock = release; }); // hold it
+    }).catch(() => resolve(true));                   // API hiccup: don't block play
+  });
+}
+
+// Resume a prior session if one is still fresh, else land on home.
+function resumeOrHome() {
   const s = loadSession();
   if (s && s.code && s.name) {
     app.nameInput = s.name;
@@ -532,6 +587,13 @@ function boot() {
   const linkCode = readCodeFromUrl();
   if (linkCode) app.codeInput = linkCode;
   draw();
+}
+
+async function boot() {
+  initTabChannel();
+  const held = await acquireTabLock();
+  if (!held) { app.screen = 'duplicate'; draw(); return; }
+  resumeOrHome();
 }
 
 boot();
