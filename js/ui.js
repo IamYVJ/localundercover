@@ -82,6 +82,17 @@ function homeScreen(app, intents) {
     class: 'btn btn-primary btn-block', onclick: () => intents.host(),
   }, 'Create game'));
 
+  // Offered only when the game server answered its health probe. Peer-to-peer
+  // stays the default (works offline on one Wi-Fi); the server lets players on
+  // different networks join the same room.
+  if (app.serverAvailable) {
+    wrap.appendChild(el('button', {
+      class: 'btn btn-secondary btn-block', onclick: () => intents.hostServer(),
+    }, 'Host on server'));
+    wrap.appendChild(el('p', { class: 'fine', style: 'text-align:center' },
+      'Create game = same Wi-Fi, works offline. Host on server = friends can join from anywhere.'));
+  }
+
   const codeField = el('input', {
     class: 'field field-code', type: 'text', maxlength: 4, placeholder: 'CODE',
     value: app.codeInput || '', autocomplete: 'off', autocapitalize: 'characters',
@@ -120,6 +131,14 @@ function connectingScreen(app, intents) {
       intents && intents.goHome
         ? el('button', { class: 'btn btn-secondary btn-block', onclick: () => intents.goHome() }, 'Back to start')
         : null);
+  }
+  // Server owner: the room code is minted by the server, so there's nothing to
+  // show until the first reply arrives — say what's happening meanwhile.
+  if (amHost && app.mode === 'server' && !app.code) {
+    return el('div', { class: 'field-group' },
+      el('div', { class: 'wordmark' }, el('span', { class: 'wordmark-dot' }), 'HOSTING'),
+      el('h1', { class: 'hero hero-sm' }, 'Creating room…'),
+      el('p', { class: 'tagline' }, 'Reserving a room on the game server.'));
   }
   // Host: surface the room code now so it can be shared while the first
   // handshake is still in flight — players can join the moment it connects.

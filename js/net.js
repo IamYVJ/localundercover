@@ -159,6 +159,66 @@ export function joinHost(code, handlers = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// SERVER transport — WebSocket to the authoritative game server (optional).
+//
+// Shape-compatible with the CLIENT transport above (send / isOpen / isDestroyed
+// / reconnect / destroy + the same handler names), so main.js's reconnect loop
+// drives either transport without caring which. In server mode BOTH the room
+// owner and the joiners use this — the server is the host, everyone's a client.
+// This is purely additive; the peer-to-peer path above is untouched.
+// ---------------------------------------------------------------------------
+export function serverConnect(url, handlers = {}) {
+  let ws = null;
+  let closed = false; // set once destroy() is called — an intentional teardown
+
+  const open = () => {
+    try { ws = new WebSocket(url); }
+    catch (err) { handlers.onError && handlers.onError(err); return; }
+
+    ws.onopen = () => {
+      handlers.onNetStatus && handlers.onNetStatus('online');
+      handlers.onOpen && handlers.onOpen();
+    };
+    ws.onmessage = (ev) => {
+      const msg = safeParse(ev.data);
+      if (msg) handlers.onData && handlers.onData(msg);
+    };
+    ws.onclose = () => {
+      if (closed) return; // we asked for this — stay quiet
+      handlers.onNetStatus && handlers.onNetStatus('reconnecting');
+      handlers.onClose && handlers.onClose();
+    };
+    ws.onerror = (err) => { handlers.onError && handlers.onError(err); };
+  };
+
+  open();
+
+  return {
+    get ws() { return ws; },
+    send(msg) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify(msg)); } catch (_) { /* torn down */ }
+      }
+    },
+    isOpen() { return !!(ws && ws.readyState === WebSocket.OPEN); },
+    isDestroyed() { return closed; },
+    reconnect() {
+      if (closed) return;
+      if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) open();
+    },
+    destroy() {
+      closed = true;
+      try { if (ws) ws.close(); } catch (_) {}
+    },
+  };
+}
+
+// A recoverable WebSocket failure looks like any close/connect error — there's
+// no rich error taxonomy as with PeerJS, so we treat drops as retryable and let
+// the bounded backoff decide when to give up.
+export function isRecoverableServerError() { return true; }
+
+// ---------------------------------------------------------------------------
 // Wire helpers — JSON over the DataConnection. Guard against malformed input.
 // ---------------------------------------------------------------------------
 function trySend(conn, msg) {

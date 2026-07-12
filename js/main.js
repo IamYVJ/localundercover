@@ -20,8 +20,9 @@ import {
 } from './util.js';
 import { GameEngine, PHASES } from './state.js';
 import {
-  createHost, joinHost, isRecoverableError, describePeerError,
+  createHost, joinHost, serverConnect, isRecoverableError, describePeerError,
 } from './net.js';
+import { SERVER_URL, SERVER_HEALTH, serverConfigured } from './config.js';
 import { render } from './ui.js';
 
 const HOST_ID = 'host';
@@ -35,6 +36,9 @@ const app = {
   screen: 'home',        // home | connecting | room | hostleft | error | duplicate
   dupBusy: false,        // duplicate screen: takeover handoff in progress
   me: null,              // { id, name, isHost, clientId }
+  mode: 'p2p',           // 'p2p' (WebRTC star) | 'server' (authoritative WS host)
+  serverAvailable: false,// health probe said the game server is reachable
+  triedP2PFallback: false,// a server join already fell back to peer-to-peer once
   code: '',
   pub: null,             // engine.publicState()
   priv: null,            // engine.privateStateFor(me.id)
@@ -123,8 +127,14 @@ function applyHostIntent(actorId, msg) {
   }
 }
 
-// Route a UI intent: the host applies it locally; a client ships it upstream.
+// Route a UI intent. In server mode EVERYONE (owner included) is a client of the
+// authoritative server, so intents always go over the wire. In peer-to-peer mode
+// the host applies it locally and a client ships it upstream.
 function act(msg) {
+  if (app.mode === 'server') {
+    if (client) client.send(msg);
+    return;
+  }
   if (app.me && app.me.isHost) {
     const res = applyHostIntent(app.me.id, msg);
     if (res && res.ok === false && res.error) showToast(res.error);
@@ -271,22 +281,47 @@ function handleClientMessage(msg) {
   if (!msg || !msg.type) return;
   switch (msg.type) {
     case 'welcome':
-      if (app.me) app.me.id = msg.id;
+      // P2P host sends { id }; the server sends { playerId, code, owner }. The
+      // server's code matters most for a fresh owner learning its minted code.
+      if (app.me) {
+        app.me.id = msg.playerId || msg.id;
+        if (typeof msg.owner === 'boolean') app.me.isHost = msg.owner;
+      }
+      if (msg.code) { app.code = msg.code; saveCode(msg.code); }
+      draw();
       break;
     case 'state':
       app.screen = 'room';
       app.netStatus = 'online';
-      app.netError = '';
-      app.netGaveUp = false;
-      app.netNextRetryAt = 0;
-      reconnectTries = 0;
+      resetNetOk();
       app.pub = msg.pub;
       app.priv = msg.priv;
       if (app.me && msg.priv && msg.priv.id) app.me.id = msg.priv.id;
-      saveSession({ role: 'client', code: app.code, name: app.nameInput });
+      // In server mode the owner is a client; trust the authoritative host flag.
+      if (app.mode === 'server' && app.me && msg.priv && typeof msg.priv.isHost === 'boolean') {
+        app.me.isHost = msg.priv.isHost;
+      }
+      persistSession();
       draw();
       break;
     case 'rejected':
+      // Server-only: a joiner whose code isn't a server room might be after a
+      // peer-to-peer host — fall back to P2P once.
+      if (app.mode === 'server' && msg.reason === 'no_room'
+          && app.me && !app.me.isHost && !app.triedP2PFallback && !app.pub) {
+        fallBackToP2PJoin();
+        return;
+      }
+      // A server owner whose room vanished (server restarted / GC'd) can't
+      // recover the same code — send them home with an explanation.
+      if (app.mode === 'server' && app.me && app.me.isHost && msg.reason === 'no_room') {
+        teardown();
+        clearSession();
+        app.error = 'That game is no longer available.';
+        app.screen = 'error';
+        draw();
+        return;
+      }
       showToast(msg.message);
       break;
     case 'kicked':
@@ -319,6 +354,107 @@ function handleClientError(err) {
   draw();
 }
 
+// ---------------------------------------------------------------------------
+// SERVER bootstrap — authoritative WebSocket host. In server mode EVERYONE is a
+// client of the server (the room owner included); there is no local engine. The
+// transport is shape-compatible with the P2P client, so the shared reconnect
+// loop (scheduleReconnect) and the shared handleClientMessage drive it unchanged.
+// ---------------------------------------------------------------------------
+function resetNetOk() {
+  app.netError = '';
+  app.netGaveUp = false;
+  app.netNextRetryAt = 0;
+  reconnectTries = 0;
+}
+
+function netStatusHandler(s) {
+  app.netStatus = s === 'online' ? 'online' : 'reconnecting';
+  if (s === 'online') resetNetOk();
+  draw();
+}
+
+// One persistence path for every mode/role so a resumed session knows which
+// transport to rebuild. mode defaults to 'p2p' for pre-existing saved sessions.
+function persistSession() {
+  saveSession({
+    mode: app.mode,
+    role: app.me && app.me.isHost ? 'host' : 'client',
+    code: app.code,
+    name: app.nameInput,
+  });
+}
+
+function startServerHost(existingCode) {
+  app.mode = 'server';
+  app.triedP2PFallback = false;
+  app.me = { id: null, name: app.nameInput, isHost: true, clientId };
+  app.code = existingCode || '';
+  app.screen = 'connecting';
+  app.error = '';
+
+  client = serverConnect(SERVER_URL, {
+    onNetStatus: netStatusHandler,
+    onOpen: () => {
+      resetNetOk();
+      // A resumed owner already holds a code → rejoin that room; a brand-new
+      // host asks the server to mint one.
+      if (app.code) client.send({ type: 'join', code: app.code, name: app.nameInput, clientId });
+      else client.send({ type: 'createRoom', name: app.nameInput, clientId });
+      draw();
+    },
+    onData: (msg) => handleClientMessage(msg),
+    onClose: () => { app.netStatus = 'reconnecting'; scheduleReconnect(); draw(); },
+    onError: (err) => handleServerError(err),
+  });
+
+  draw();
+}
+
+function startServerJoin(code) {
+  app.mode = 'server';
+  app.me = { id: null, name: app.nameInput, isHost: false, clientId };
+  app.code = code;
+  app.screen = 'connecting';
+  app.error = '';
+
+  client = serverConnect(SERVER_URL, {
+    onNetStatus: netStatusHandler,
+    onOpen: () => {
+      resetNetOk();
+      client.send({ type: 'join', code, name: app.nameInput, clientId });
+      draw();
+    },
+    onData: (msg) => handleClientMessage(msg),
+    onClose: () => { app.netStatus = 'reconnecting'; scheduleReconnect(); draw(); },
+    onError: (err) => handleServerError(err),
+  });
+
+  draw();
+}
+
+// A server-mode joiner that can't reach the server may fall back to peer-to-peer
+// ONCE — the code might belong to a P2P host. An owner has no fallback: a "host
+// on server" request must use the server, so it just reconnects.
+function handleServerError(_err) {
+  const amOwner = !!(app.me && app.me.isHost);
+  if (!amOwner && !app.triedP2PFallback && !app.pub && app.code) {
+    fallBackToP2PJoin();
+    return;
+  }
+  app.netStatus = 'reconnecting';
+  app.netError = "Couldn't reach the game server.";
+  scheduleReconnect();
+  draw();
+}
+
+function fallBackToP2PJoin() {
+  const code = app.code;
+  app.triedP2PFallback = true;
+  teardown();
+  app.mode = 'p2p';
+  startJoin(code);
+}
+
 // Keep trying to re-reach the broker with exponential backoff. Works for both
 // roles: the host retries on its room-code peer, a client on its anonymous peer.
 // If PeerJS has torn the peer down entirely (it can't be reconnect()-ed), rebuild
@@ -336,7 +472,8 @@ function scheduleReconnect() {
   const attempt = () => {
     reconnectTimer = null;
     const amHost = !!(app.me && app.me.isHost);
-    const t = amHost ? host : client;
+    // In server mode both roles ride the single client transport.
+    const t = app.mode === 'server' ? client : (amHost ? host : client);
     if (!t) return;
 
     if (t.isOpen()) {
@@ -359,8 +496,13 @@ function scheduleReconnect() {
 
     reconnectTries += 1;
     if (t.isDestroyed && t.isDestroyed()) {
-      if (amHost) startHost(app.code, engine ? engine.serialize() : loadEngineSnapshot());
-      else startJoin(app.code);
+      if (app.mode === 'server') {
+        if (amHost) startServerHost(app.code); else startServerJoin(app.code);
+      } else if (amHost) {
+        startHost(app.code, engine ? engine.serialize() : loadEngineSnapshot());
+      } else {
+        startJoin(app.code);
+      }
     } else {
       try { t.reconnect(); } catch (_) {}
     }
@@ -389,6 +531,8 @@ function resetToHome() {
   app.pub = null;
   app.priv = null;
   app.code = '';
+  app.mode = 'p2p';           // next action starts fresh; serverAvailable persists
+  app.triedP2PFallback = false;
   app.netStatus = 'online';
   app.netError = '';
   app.netGaveUp = false;
@@ -398,7 +542,10 @@ function resetToHome() {
 }
 
 function leave() {
-  if (app.me && app.me.isHost && host) {
+  if (app.mode === 'server' && client) {
+    // Server mode: the owner ends the whole room; a joiner just leaves its seat.
+    try { client.send({ type: app.me && app.me.isHost ? 'endGame' : 'leave' }); } catch (_) {}
+  } else if (app.me && app.me.isHost && host) {
     host.broadcast({ type: 'error', message: 'The host ended the game.' });
   } else if (client) {
     try { client.send({ type: 'leave' }); } catch (_) {}
@@ -426,6 +573,13 @@ function doHost() {
   startHost(code, null);
 }
 
+function doHostServer() {
+  const name = (app.nameInput || '').trim();
+  if (!name) { app.error = 'Enter your name first.'; draw(); return; }
+  saveName(name);
+  startServerHost(null); // the server mints the room code
+}
+
 function doJoin() {
   const name = (app.nameInput || '').trim();
   const code = normalizeCode(app.codeInput || '');
@@ -433,7 +587,11 @@ function doJoin() {
   if (code.length !== 4) { app.error = 'Enter the 4-letter room code.'; draw(); return; }
   saveName(name);
   saveCode(code);
-  startJoin(code);
+  app.triedP2PFallback = false;
+  // When a server is reachable, try it first; a "no room" answer falls back to
+  // peer-to-peer, so a single "Join" button reaches BOTH kinds of host.
+  if (app.serverAvailable) startServerJoin(code);
+  else startJoin(code);
 }
 
 async function copyCode() {
@@ -481,6 +639,7 @@ const intents = {
   setName: (v) => { app.nameInput = v; saveName(v); },
   setCode: (v) => { app.codeInput = v; },
   host: doHost,
+  hostServer: doHostServer,
   join: doJoin,
   goHome,
   leave,
@@ -489,7 +648,7 @@ const intents = {
     reconnectTries = 0;
     app.netGaveUp = false;
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    const t = app.me && app.me.isHost ? host : client;
+    const t = app.mode === 'server' ? client : (app.me && app.me.isHost ? host : client);
     if (t) { try { t.reconnect(); } catch (_) {} }
     scheduleReconnect();
     draw();
@@ -580,6 +739,10 @@ function resumeOrHome() {
   const s = loadSession();
   if (s && s.code && s.name) {
     app.nameInput = s.name;
+    if (s.mode === 'server') {
+      if (s.role === 'host') startServerHost(s.code); else startServerJoin(s.code);
+      return;
+    }
     if (s.role === 'host') { startHost(s.code, loadEngineSnapshot()); return; }
     startJoin(s.code);
     return;
@@ -589,11 +752,29 @@ function resumeOrHome() {
   draw();
 }
 
+// Probe the game server so the home screen can offer "Host on server". Cheap,
+// best-effort and time-boxed: if it doesn't answer fast, we stay peer-to-peer.
+async function checkServerHealth() {
+  if (!serverConfigured()) return;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 1500);
+  try {
+    const res = await fetch(SERVER_HEALTH, { cache: 'no-store', signal: ctrl.signal });
+    app.serverAvailable = !!(res && res.ok);
+  } catch (_) {
+    app.serverAvailable = false;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (app.screen === 'home') draw();
+}
+
 async function boot() {
   initTabChannel();
   const held = await acquireTabLock();
   if (!held) { app.screen = 'duplicate'; draw(); return; }
   resumeOrHome();
+  checkServerHealth();
 }
 
 boot();

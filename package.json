@@ -1,0 +1,17 @@
+{
+  "name": "localundercover",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Undercover — a social word-deduction party game. Peer-to-peer over your local network by default, with an optional authoritative-server hosting mode.",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node scripts/test-engine.mjs && node scripts/test-server.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
