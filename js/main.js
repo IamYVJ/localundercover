@@ -38,6 +38,7 @@ const app = {
   pub: null,             // engine.publicState()
   priv: null,            // engine.privateStateFor(me.id)
   netStatus: 'online',   // online | reconnecting
+  netError: '',          // set when the broker/handshake is unreachable
   error: '',
   toast: '',
   nameInput: loadName(),
@@ -164,10 +165,15 @@ function startHost(code, snap) {
   else { seat.online = true; seat.name = app.nameInput; }
 
   host = createHost(code, {
-    onNetStatus: (s) => { app.netStatus = s === 'online' ? 'online' : 'reconnecting'; draw(); },
+    onNetStatus: (s) => {
+      app.netStatus = s === 'online' ? 'online' : 'reconnecting';
+      if (s === 'online') app.netError = '';
+      draw();
+    },
     onOpen: () => {
       app.screen = 'room';
       app.netStatus = 'online';
+      app.netError = '';
       saveSession({ role: 'host', code, name: app.nameInput });
       hostSync();
     },
@@ -193,7 +199,13 @@ function startHost(code, snap) {
 }
 
 function handleHostError(err) {
-  if (isRecoverableError(err)) { app.netStatus = 'reconnecting'; draw(); return; }
+  if (isRecoverableError(err)) {
+    app.netStatus = 'reconnecting';
+    app.netError = describePeerError(err);
+    scheduleReconnect();
+    draw();
+    return;
+  }
   app.error = describePeerError(err);
   app.screen = 'error';
   draw();
@@ -209,9 +221,14 @@ function startJoin(code) {
   app.error = '';
 
   client = joinHost(code, {
-    onNetStatus: (s) => { app.netStatus = s === 'online' ? 'online' : 'reconnecting'; draw(); },
+    onNetStatus: (s) => {
+      app.netStatus = s === 'online' ? 'online' : 'reconnecting';
+      if (s === 'online') app.netError = '';
+      draw();
+    },
     onOpen: () => {
       app.netStatus = 'online';
+      app.netError = '';
       client.send({ type: 'join', name: app.nameInput, clientId });
       draw();
     },
@@ -259,22 +276,40 @@ function handleClientMessage(msg) {
 }
 
 function handleClientError(err) {
-  if (isRecoverableError(err)) { app.netStatus = 'reconnecting'; scheduleReconnect(); draw(); return; }
+  if (isRecoverableError(err)) {
+    app.netStatus = 'reconnecting';
+    app.netError = describePeerError(err);
+    scheduleReconnect();
+    draw();
+    return;
+  }
   app.error = describePeerError(err);
   app.screen = app.pub ? 'hostleft' : 'error';
   draw();
 }
 
+// Keep trying to re-reach the broker. Works for both roles: the host retries on
+// its room-code peer, a client on its anonymous peer. If PeerJS has torn the
+// peer down entirely (it can't be reconnect()-ed), rebuild it from scratch.
 function scheduleReconnect() {
   if (reconnectTimer) return;
+  const stop = () => { clearInterval(reconnectTimer); reconnectTimer = null; };
   reconnectTimer = setInterval(() => {
-    if (!client) { clearInterval(reconnectTimer); reconnectTimer = null; return; }
-    if (client.isOpen()) {
-      clearInterval(reconnectTimer); reconnectTimer = null;
-      app.netStatus = 'online'; draw();
+    const amHost = !!(app.me && app.me.isHost);
+    const t = amHost ? host : client;
+    if (!t) { stop(); return; }
+    if (t.isOpen()) {
+      stop();
+      app.netStatus = 'online'; app.netError = ''; draw();
       return;
     }
-    try { client.reconnect(); } catch (_) {}
+    if (t.isDestroyed && t.isDestroyed()) {
+      stop();
+      if (amHost) startHost(app.code, engine ? engine.serialize() : loadEngineSnapshot());
+      else startJoin(app.code);
+      return;
+    }
+    try { t.reconnect(); } catch (_) {}
   }, 2500);
 }
 
@@ -296,6 +331,7 @@ function resetToHome() {
   app.priv = null;
   app.code = '';
   app.netStatus = 'online';
+  app.netError = '';
   app.error = '';
   draw();
 }
@@ -387,6 +423,12 @@ const intents = {
   join: doJoin,
   goHome,
   leave,
+  retryNow: () => {
+    const t = app.me && app.me.isHost ? host : client;
+    if (t) { try { t.reconnect(); } catch (_) {} }
+    scheduleReconnect();
+    draw();
+  },
   showRules: () => { app.showRules = true; draw(); },
   hideRules: () => { app.showRules = false; draw(); },
   copyCode,

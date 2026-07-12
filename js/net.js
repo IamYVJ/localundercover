@@ -108,6 +108,8 @@ export function createHost(code, handlers = {}) {
     reconnect() {
       if (!peer.destroyed && peer.disconnected) { try { peer.reconnect(); } catch (_) {} }
     },
+    isOpen() { return !!peer.open; },
+    isDestroyed() { return !!peer.destroyed; },
     destroy() { try { peer.destroy(); } catch (_) {} },
   };
 }
@@ -146,6 +148,7 @@ export function joinHost(code, handlers = {}) {
     peer,
     send(msg) { if (conn && conn.open) trySend(conn, msg); },
     isOpen() { return !!(conn && conn.open); },
+    isDestroyed() { return !!peer.destroyed; },
     reconnect() {
       if (peer.destroyed) return;
       if (peer.disconnected) { try { peer.reconnect(); } catch (_) {} return; }

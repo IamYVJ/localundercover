@@ -42,8 +42,9 @@ export function render(root, app, intents) {
   if (key !== _lastKey) { shell.classList.add('screen-enter'); _lastKey = key; }
   root.appendChild(shell);
 
-  // Overlays.
-  if (app.netStatus === 'reconnecting') {
+  // Overlays. The connecting screen already spells out the reconnect state, so
+  // the floating banner would just be noise there.
+  if (app.netStatus === 'reconnecting' && app.screen !== 'connecting') {
     root.appendChild(el('div', { class: 'net-banner' }, 'Reconnecting…'));
   }
   if (app.showRules) root.appendChild(rulesModal(intents));
@@ -94,10 +95,26 @@ function homeScreen(app, intents) {
   return wrap;
 }
 
-function connectingScreen(app) {
+function connectingScreen(app, intents) {
+  const amHost = app.me && app.me.isHost;
+  // Broker unreachable during the first handshake: give feedback + an escape,
+  // rather than an indefinite "Joining…" that looks frozen.
+  if (app.netError) {
+    return el('div', { class: 'field-group' },
+      el('div', { class: 'wordmark' }, el('span', { class: 'wordmark-dot' }), 'RECONNECTING'),
+      el('h1', { class: 'hero hero-sm' }, "Can't reach the server"),
+      el('p', { class: 'tagline' }, app.netError),
+      el('p', { class: 'fine' }, 'Retrying automatically…'),
+      intents && intents.retryNow
+        ? el('button', { class: 'btn btn-primary btn-block', onclick: () => intents.retryNow() }, 'Try again now')
+        : null,
+      intents && intents.goHome
+        ? el('button', { class: 'btn btn-secondary btn-block', onclick: () => intents.goHome() }, 'Back to start')
+        : null);
+  }
   return el('div', { class: 'field-group' },
     el('div', { class: 'wordmark' }, el('span', { class: 'wordmark-dot' }), 'CONNECTING'),
-    el('h1', { class: 'hero hero-sm' }, app.me && app.me.isHost ? 'Opening room…' : 'Joining…'),
+    el('h1', { class: 'hero hero-sm' }, amHost ? 'Opening room…' : 'Joining…'),
     el('p', { class: 'tagline' }, 'Reaching the connection server for the first handshake.'));
 }
 
@@ -114,7 +131,7 @@ function messageScreen(title, body, intents) {
 // ---------------------------------------------------------------------------
 function roomScreen(app, intents) {
   const pub = app.pub;
-  if (!pub) return connectingScreen(app);
+  if (!pub) return connectingScreen(app, intents);
   switch (pub.phase) {
     case PHASES.LOBBY:       return lobbyScreen(app, intents);
     case PHASES.ROLE_REVEAL: return roleRevealScreen(app, intents);
@@ -123,7 +140,7 @@ function roomScreen(app, intents) {
     case PHASES.REVEAL:      return eliminationScreen(app, intents);
     case PHASES.WHITE_GUESS: return whiteGuessScreen(app, intents);
     case PHASES.GAMEOVER:    return gameoverScreen(app, intents);
-    default:                 return connectingScreen(app);
+    default:                 return connectingScreen(app, intents);
   }
 }
 
