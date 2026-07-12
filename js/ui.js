@@ -120,9 +120,25 @@ function connectingScreen(app, intents) {
         ? el('button', { class: 'btn btn-secondary btn-block', onclick: () => intents.goHome() }, 'Back to start')
         : null);
   }
+  // Host: surface the room code now so it can be shared while the first
+  // handshake is still in flight — players can join the moment it connects.
+  if (amHost && app.code) {
+    return el('div', { class: 'field-group' },
+      el('div', { class: 'wordmark' }, el('span', { class: 'wordmark-dot' }), 'ROOM CODE'),
+      el('div', {
+        class: 'room-code', onclick: () => intents.copyCode(), title: 'Tap to copy',
+      }, app.code),
+      el('p', { class: 'tagline' }, 'Opening room…'),
+      el('p', { class: 'fine', style: 'text-align:center' },
+        'Reaching the connection server. Share the code now — friends can join the moment it connects.'),
+      intents && intents.shareLink
+        ? el('button', { class: 'btn btn-secondary btn-block', onclick: () => intents.shareLink() }, 'Share invite link')
+        : null);
+  }
+
   return el('div', { class: 'field-group' },
     el('div', { class: 'wordmark' }, el('span', { class: 'wordmark-dot' }), 'CONNECTING'),
-    el('h1', { class: 'hero hero-sm' }, amHost ? 'Opening room…' : 'Joining…'),
+    el('h1', { class: 'hero hero-sm' }, 'Joining…'),
     el('p', { class: 'tagline' }, 'Reaching the connection server for the first handshake.'));
 }
 
