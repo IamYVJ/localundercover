@@ -363,17 +363,23 @@ function describeScreen(app, intents) {
 
   if (d.endsAt) wrap.appendChild(countdownEl(d.endsAt, d.seconds, myTurn));
 
-  // Speaking order with progress.
+  // Speaking order with progress. The host can drop a player who has left or is
+  // holding things up — offline seats are flagged so it's clear who to remove.
+  const amHost = isHost(app);
   const list = el('ul', { class: 'player-list' });
   d.order.forEach((id, i) => {
     const p = pub.players.find((x) => x.id === id);
     if (!p) return;
     const state = i < d.idx ? 'done' : (i === d.idx ? 'current' : 'pending');
-    list.appendChild(el('li', { class: 'player-row' + (id === app.me.id ? ' me' : '') },
+    list.appendChild(el('li', { class: 'player-row' + (p.online ? '' : ' offline') + (id === app.me.id ? ' me' : '') },
       el('span', { class: 'turn-num' + (state === 'current' ? ' now' : '') }, String(i + 1)),
       el('span', { class: 'pname' }, p.name),
+      !p.online ? el('span', { class: 'pill' }, 'offline') : null,
       state === 'done' ? el('span', { class: 'pill civ' }, 'spoke')
-        : state === 'current' ? el('span', { class: 'pill accent' }, 'speaking') : null));
+        : state === 'current' ? el('span', { class: 'pill accent' }, 'speaking') : null,
+      (amHost && !p.isHost && id !== app.me.id)
+        ? el('button', { class: 'link-btn', onclick: () => intents.kick(id) }, 'remove')
+        : null));
   });
   wrap.appendChild(el('div', { class: 'card' },
     el('div', { class: 'card-label' }, 'Speaking order'), list));

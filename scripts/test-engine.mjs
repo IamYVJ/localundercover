@@ -597,5 +597,160 @@ function firstCivAlive(g) { return g.alivePlayers().find((p) => p.roleId === ROL
 }
 
 // ===========================================================================
+// KICK / REMOVE PLAYER (host moderation, lobby + mid-game)
+// ===========================================================================
+
+// Guards: only the host kicks, never the host, never a stranger.
+{
+  const g = setup(5, { undercover: 1, mrwhite: 0 }, 201);
+  ok(!g.kickPlayer('p1', 'p2').ok, 'kick: a non-host is refused');
+  ok(g.getPlayer('p2'), 'kick: target survives a refused kick');
+  ok(!g.kickPlayer(g.hostId, g.hostId).ok, 'kick: the host cannot be removed');
+  ok(!g.kickPlayer(g.hostId, 'nobody').ok, 'kick: an unknown target is refused');
+}
+
+// Lobby kick just frees the seat (delegates to removePlayer + reclamp).
+{
+  const g = new GameEngine({ rng: rng(204) });
+  for (let i = 0; i < 5; i++) g.addPlayer({ id: 'p'+i, name: 'P'+i, clientId: 'c'+i, isHost: i === 0 });
+  ok(g.kickPlayer('p0', 'p3').ok, 'kick lobby: removal ok');
+  eq(g.players.length, 4, 'kick lobby: seat freed');
+  ok(!g.getPlayer('p3'), 'kick lobby: player gone');
+}
+
+// During role reveal, removing the last unready player starts the round.
+{
+  const g = setup(6, { undercover: 1, mrwhite: 0 }, 205);
+  eq(g.phase, PHASES.ROLE_REVEAL, 'kick reveal: in role reveal');
+  const civ = g.players.find((p) => p.roleId === ROLES.CIVILIAN && p.id !== g.hostId).id;
+  for (const p of g.players) if (p.id !== civ) g.setReady(p.id);
+  eq(g.phase, PHASES.ROLE_REVEAL, 'kick reveal: still waiting on the unready civilian');
+  ok(g.kickPlayer(g.hostId, civ).ok, 'kick reveal: removal ok');
+  eq(g.phase, PHASES.DESCRIBE, 'kick reveal: removing the last holdout begins describing');
+  ok(!g.getPlayer(civ), 'kick reveal: player gone');
+}
+
+// Removing an upcoming speaker shrinks the order but keeps the current speaker.
+{
+  const g = setup(6, { undercover: 1, mrwhite: 0 }, 206);
+  readyAll(g);
+  eq(g.phase, PHASES.DESCRIBE, 'kick describe: describing');
+  const d = g.publicState().describe;
+  const curId = d.currentSpeakerId;
+  const lenBefore = d.order.length;
+  const victim = d.order.slice(d.idx + 1)
+    .find((id) => id !== g.hostId && g.getPlayer(id).roleId === ROLES.CIVILIAN);
+  ok(g.kickPlayer(g.hostId, victim).ok, 'kick describe: upcoming speaker removed');
+  const d2 = g.publicState().describe;
+  eq(d2.order.length, lenBefore - 1, 'kick describe: speaking order shrank by one');
+  eq(d2.currentSpeakerId, curId, 'kick describe: current speaker preserved');
+  ok(!d2.order.includes(victim), 'kick describe: victim gone from the order');
+  eq(g.phase, PHASES.DESCRIBE, 'kick describe: the round keeps going');
+}
+
+// Removing the current speaker steps the next player up (or moves to the vote).
+{
+  const g = setup(6, { undercover: 1, mrwhite: 0 }, 207);
+  readyAll(g);
+  let cur = g.getPlayer(g.speaking.order[g.speaking.idx]);
+  while (g.phase === PHASES.DESCRIBE && cur && (cur.id === g.hostId || cur.roleId !== ROLES.CIVILIAN)) {
+    g.advanceSpeaker(g.speaking.order[g.speaking.idx]);
+    cur = g.speaking ? g.getPlayer(g.speaking.order[g.speaking.idx]) : null;
+  }
+  ok(g.phase === PHASES.DESCRIBE && cur, 'kick current: parked on a removable current speaker');
+  const victimId = cur.id;
+  const nextId = g.speaking.order[g.speaking.idx + 1] || null;
+  ok(g.kickPlayer(g.hostId, victimId).ok, 'kick current: current speaker removed');
+  ok(!g.getPlayer(victimId), 'kick current: player gone');
+  if (g.phase === PHASES.DESCRIBE) {
+    eq(g.speaking.order[g.speaking.idx], nextId, 'kick current: the next speaker steps up');
+  } else {
+    eq(g.phase, PHASES.VOTE, 'kick current: removing the final speaker moves to the vote');
+  }
+}
+
+// Removing the last impostor mid-describe ends the game for the civilians.
+{
+  const g = setup(5, { undercover: 1, mrwhite: 0 }, 300);
+  readyAll(g);
+  eq(g.phase, PHASES.DESCRIBE, 'kick win: describing');
+  const uc = roleId(g, ROLES.UNDERCOVER);
+  ok(uc !== g.hostId, 'kick win: undercover is a guest for this seed');
+  ok(g.kickPlayer(g.hostId, uc).ok, 'kick win: undercover removed');
+  eq(g.phase, PHASES.GAMEOVER, 'kick win: no impostor left -> game over');
+  eq(g.winner, 'civilians', 'kick win: civilians win');
+}
+
+// Mid-vote: the departed player's ballot + candidacy are scrubbed, and losing
+// the last non-voter resolves the tally.
+{
+  const g = setup(5, { undercover: 1, mrwhite: 0 }, 209);
+  readyAll(g);
+  describeAll(g);
+  eq(g.phase, PHASES.VOTE, 'kick vote: voting');
+  const alive = g.alivePlayers().map((p) => p.id);
+  const victim = alive.find((id) => id !== g.hostId && g.getPlayer(id).roleId === ROLES.CIVILIAN);
+  const others = alive.filter((id) => id !== victim);
+  const target = others[0];
+  for (const id of others) g.castVote(id, id === target ? others[1] : target);
+  ok(g.vote.candidates.includes(victim), 'kick vote: victim is a candidate before removal');
+  eq(g.phase, PHASES.VOTE, 'kick vote: open while the victim has not voted');
+  ok(g.kickPlayer(g.hostId, victim).ok, 'kick vote: victim removed mid-vote');
+  eq(g.phase, PHASES.REVEAL, 'kick vote: dropping the last non-voter resolves the vote');
+}
+
+// Mid-vote removal can also settle the game outright.
+{
+  const g = setup(5, { undercover: 1, mrwhite: 0 }, 210);
+  readyAll(g);
+  describeAll(g);
+  eq(g.phase, PHASES.VOTE, 'kick vote-win: voting');
+  const uc = roleId(g, ROLES.UNDERCOVER);
+  ok(uc !== g.hostId, 'kick vote-win: undercover is a guest for this seed');
+  ok(g.kickPlayer(g.hostId, uc).ok, 'kick vote-win: undercover removed');
+  eq(g.phase, PHASES.GAMEOVER, 'kick vote-win: last impostor gone -> game over');
+  eq(g.winner, 'civilians', 'kick vote-win: civilians win');
+}
+
+// Kicking is deferred during the transient reveal / guess steps.
+{
+  const g = setup(5, { undercover: 1, mrwhite: 0 }, 211);
+  readyAll(g);
+  describeAll(g);
+  voteOut(g, firstCivAlive(g));
+  eq(g.phase, PHASES.REVEAL, 'kick reveal-phase: at the reveal');
+  const someone = g.alivePlayers().find((p) => p.id !== g.hostId).id;
+  ok(!g.kickPlayer(g.hostId, someone).ok, 'kick reveal-phase: refused during the reveal');
+  ok(g.getPlayer(someone), 'kick reveal-phase: target retained');
+}
+{
+  const g = setup(5, { undercover: 1, mrwhite: 1 }, 212);
+  readyAll(g);
+  const wh = roleId(g, ROLES.MRWHITE);
+  describeAll(g);
+  voteOut(g, wh);
+  g.continueAfterReveal(g.hostId);
+  eq(g.phase, PHASES.WHITE_GUESS, 'kick guess-phase: at the white guess');
+  const someone = g.alivePlayers().find((p) => p.id !== g.hostId).id;
+  ok(!g.kickPlayer(g.hostId, someone).ok, 'kick guess-phase: refused during the white guess');
+}
+
+// After the game, a kick simply frees the seat without disturbing the result.
+{
+  const g = setup(4, { undercover: 1, mrwhite: 0 }, 213);
+  readyAll(g);
+  const uc = roleId(g, ROLES.UNDERCOVER);
+  describeAll(g);
+  voteOut(g, uc);
+  g.continueAfterReveal(g.hostId);
+  eq(g.phase, PHASES.GAMEOVER, 'kick gameover: game ended');
+  const victim = g.players.find((p) => p.id !== g.hostId).id;
+  const before = g.players.length;
+  ok(g.kickPlayer(g.hostId, victim).ok, 'kick gameover: removal ok');
+  eq(g.players.length, before - 1, 'kick gameover: seat freed after the game');
+  eq(g.winner, 'civilians', 'kick gameover: the recorded winner is untouched');
+}
+
+// ===========================================================================
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

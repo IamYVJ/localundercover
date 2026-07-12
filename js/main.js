@@ -79,8 +79,7 @@ function applyHostIntent(actorId, msg) {
     case 'start':
       return engine.startGame(actorId);
     case 'kick': {
-      if (!engine.isHost(actorId)) return { ok: false, error: 'Only the host can remove players.' };
-      const r = engine.removePlayer(msg.target);
+      const r = engine.kickPlayer(actorId, msg.target);
       if (r.ok && host) {
         host.sendTo(msg.target, { type: 'kicked' });
         const c = host.connections.get(msg.target);

@@ -146,6 +146,57 @@ export class GameEngine {
     return { ok: true };
   }
 
+  // Host removes a player. In the lobby this just frees the seat; mid-game it
+  // drops them from the round, repairs whatever phase they were blocking, and
+  // ends the game if their exit decided it. The reveal and Mr.-White-guess steps
+  // are transient and host-driven, so a kick is deferred until they pass.
+  kickPlayer(actorId, targetId) {
+    if (!this.isHost(actorId)) return { ok: false, error: 'Only the host can remove players.' };
+    const p = this.getPlayer(targetId);
+    if (!p) return { ok: false, error: 'No such player.' };
+    if (this.isHost(targetId)) return { ok: false, error: 'The host can’t be removed.' };
+    if (this.phase === PHASES.LOBBY) return this.removePlayer(targetId);
+    if (this.phase === PHASES.REVEAL || this.phase === PHASES.WHITE_GUESS) {
+      return { ok: false, error: 'Finish this step, then you can remove a player.' };
+    }
+
+    const wasAlive = p.alive;
+    this.players = this.players.filter((x) => x.id !== targetId);
+    this._log(`${p.name} was removed from the game.`);
+    if (this.phase === PHASES.GAMEOVER) return { ok: true }; // no round to repair
+
+    // Scrub the departed player from any in-flight speaking order / ballots so
+    // the cursor and tally stay consistent.
+    if (this.speaking && Array.isArray(this.speaking.order)) {
+      const curId = this.speaking.order[this.speaking.idx];
+      this.speaking.order = this.speaking.order.filter((id) => id !== targetId);
+      const at = this.speaking.order.indexOf(curId);
+      this.speaking.idx = at === -1
+        ? Math.min(this.speaking.idx, this.speaking.order.length)
+        : at;
+    }
+    if (this.vote) {
+      delete this.vote.ballots[targetId];
+      this.vote.candidates = this.vote.candidates.filter((id) => id !== targetId);
+    }
+
+    // Losing a living player can settle the game outright — don't make anyone
+    // describe or vote a round that's already decided.
+    if (wasAlive && this._endIfDecided()) return { ok: true };
+
+    // Otherwise keep the round flowing from wherever we are.
+    if (this.phase === PHASES.ROLE_REVEAL) {
+      const onlineUnready = this.players.filter((x) => x.online && !x.ready);
+      if (onlineUnready.length === 0) this._startDescribeRound(true);
+    } else if (this.phase === PHASES.DESCRIBE) {
+      this._settleDescribeTurn(false);
+    } else if (this.phase === PHASES.VOTE) {
+      if (this.vote.candidates.length === 0) this._noElimination([]);
+      else this._maybeResolveVote();
+    }
+    return { ok: true };
+  }
+
   setConfig(actorId, partial) {
     if (!this.isHost(actorId)) return { ok: false, error: 'Only the host can change settings.' };
     if (this.phase !== PHASES.LOBBY) return { ok: false, error: 'Settings are locked once the game starts.' };
@@ -485,22 +536,30 @@ export class GameEngine {
   }
 
   // ---- win check / advance ------------------------------------------------
-  _winCheckAndAdvance() {
-    const alive = this.alivePlayers().map((p) => ({ role: p.roleId }));
-    const w = checkWinner(alive);
+  // End the game if the living roles already decide it. Returns whether it did,
+  // so callers can either stop (game over) or carry on with the round.
+  _endIfDecided() {
+    const w = checkWinner(this.alivePlayers().map((p) => ({ role: p.roleId })));
     if (w === 'civilians') {
       this._endGame('civilians', 'All impostors are out — the civilians win!');
-    } else if (w === 'undercover') {
+      return true;
+    }
+    if (w === 'undercover') {
       const survivors = this.alivePlayers().filter((p) => p.roleId !== ROLES.CIVILIAN);
       const onlyWhite = survivors.length > 0 && survivors.every((p) => p.roleId === ROLES.MRWHITE);
       this._endGame('undercover',
         onlyWhite
           ? 'Mr. White reached parity — the impostors win!'
           : 'The undercover side reached parity — the impostors win!');
-    } else {
-      this.round += 1;
-      this._startDescribeRound(false);
+      return true;
     }
+    return false;
+  }
+
+  _winCheckAndAdvance() {
+    if (this._endIfDecided()) return;
+    this.round += 1;
+    this._startDescribeRound(false);
   }
 
   _endGame(winner, reason) {
