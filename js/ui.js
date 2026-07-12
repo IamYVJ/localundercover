@@ -393,6 +393,47 @@ function describeScreen(app, intents) {
   return wrap;
 }
 
+// Synthesized cues so the speaker isn't glued to the screen in the final
+// seconds. WebAudio (no asset files, works offline) + haptics where supported.
+// Both fail silently — a missing API just means no cue, never a broken turn.
+let _audioCtx = null;
+function _tone(freq, durationMs, peak) {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!_audioCtx) _audioCtx = new AC();
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+    const now = _audioCtx.currentTime;
+    const osc = _audioCtx.createOscillator();
+    const gain = _audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(peak, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + durationMs / 1000);
+    osc.connect(gain).connect(_audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + durationMs / 1000 + 0.02);
+  } catch (_) { /* no audio — silent is fine */ }
+}
+function _buzz(pattern) {
+  try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (_) { /* ignore */ }
+}
+// Browsers block audio until a user gesture, so warm the context on the first
+// tap/keypress — by the time a turn counts down, cues will actually play.
+function _primeAudio() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!_audioCtx) _audioCtx = new AC();
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+  } catch (_) { /* ignore */ }
+}
+if (typeof window !== 'undefined') {
+  ['pointerdown', 'keydown'].forEach((ev) =>
+    window.addEventListener(ev, _primeAudio, { passive: true }));
+}
+
 // A local countdown to an absolute deadline (endsAt, epoch ms). Ticks via a
 // single module-level interval that render() clears on the next redraw.
 function countdownEl(endsAt, seconds, myTurn) {
@@ -402,12 +443,23 @@ function countdownEl(endsAt, seconds, myTurn) {
   const box = el('div', { class: 'timer' + (myTurn ? ' mine' : '') },
     num, el('div', { class: 'timer-bar' }, fill));
 
+  let lastCued = null; // last whole-second we cued (tick fires 4x/sec)
   const tick = () => {
     const remaining = Math.max(0, endsAt - Date.now());
-    num.textContent = Math.ceil(remaining / 1000) + 's';
+    const secLeft = Math.ceil(remaining / 1000);
+    num.textContent = secLeft + 's';
     fill.style.width = Math.max(0, Math.min(100, (remaining / total) * 100)) + '%';
     box.classList.toggle('low', remaining <= 5000);
-    if (remaining <= 0 && _ticker) { clearInterval(_ticker); _ticker = null; }
+    // Only the player on the clock is cued — no chorus of buzzing phones.
+    if (myTurn && remaining <= 5000 && secLeft > 0 && secLeft !== lastCued) {
+      lastCued = secLeft;
+      _tone(660, 70, 0.05);
+      _buzz(25);
+    }
+    if (remaining <= 0) {
+      if (myTurn && lastCued !== 0) { lastCued = 0; _tone(392, 260, 0.09); _buzz([50, 40, 80]); }
+      if (_ticker) { clearInterval(_ticker); _ticker = null; }
+    }
   };
   tick();
   _ticker = setInterval(tick, 250);
