@@ -31,9 +31,18 @@ The host chooses how vote ties are settled: a **runoff** between the tied player
 
 ## How to play
 
-1. One person taps **Create game** and shares the 4‑letter room code.
-2. Everyone else joins on the same Wi‑Fi with that code and their name.
+1. One person enters their name and taps **Create game** (local Wi‑Fi) or **Host on server** (players join from anywhere), then shares the 4‑letter room code.
+2. Everyone else enters that code and their name to join.
 3. The host picks a word category and role counts, then starts.
 4. Hold your card to peek at your secret word — it only ever shows on your own device.
 
-Supports **4–20 players**. It's peer‑to‑peer over your local network, with no accounts and nothing to install — though you can add it to your home screen as an app if you like.
+Supports **4–20 players**, with no accounts and nothing to install — add it to your home screen as an app if you like.
+
+## Local or online
+
+Two ways to host, picked when you start a game:
+
+- **Create game** — peer‑to‑peer over your local Wi‑Fi. No server, works fully offline; everyone just needs to be on the same network.
+- **Host on server** — the game runs on a shared always‑on server, so players can join from **anywhere**, on any network. This option appears when the server is reachable.
+
+A small badge shows whether the current game is running **on the server** or over local **Wi‑Fi**, and the home screen shows whether the server is reachable right now.
