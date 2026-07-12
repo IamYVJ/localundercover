@@ -1,0 +1,16 @@
+{
+  "name": "Undercover — local",
+  "short_name": "Undercover",
+  "description": "A peer-to-peer social word-deduction party game. One phone each, one host, no app store.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B0B10",
+  "theme_color": "#0B0B10",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "./icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
