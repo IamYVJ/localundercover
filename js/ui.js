@@ -110,9 +110,9 @@ function connectingScreen(app, intents) {
         app.netGaveUp ? 'OFFLINE' : 'RECONNECTING'),
       el('h1', { class: 'hero hero-sm' }, "Can't reach the server"),
       el('p', { class: 'tagline' }, app.netError),
-      el('p', { class: 'fine' },
-        app.netGaveUp ? 'Gave up after several tries — check your connection, then try again.'
-                      : 'Retrying automatically…'),
+      app.netGaveUp
+        ? el('p', { class: 'fine' }, 'Gave up after several tries — check your connection, then try again.')
+        : retryCountdownEl(app),
       intents && intents.retryNow
         ? el('button', { class: 'btn btn-primary btn-block', onclick: () => intents.retryNow() }, 'Try again now')
         : null,
@@ -140,6 +140,22 @@ function connectingScreen(app, intents) {
     el('div', { class: 'wordmark' }, el('span', { class: 'wordmark-dot' }), 'CONNECTING'),
     el('h1', { class: 'hero hero-sm' }, 'Joining…'),
     el('p', { class: 'tagline' }, 'Reaching the connection server for the first handshake.'));
+}
+
+// Live "retrying in Ns…" line for the connecting screen. Reads the controller's
+// next-retry timestamp on each tick so it stays in step with the backoff even
+// when main.js reschedules without a re-render. Reuses the single _ticker (the
+// turn timer is never on screen at the same time).
+function retryCountdownEl(app) {
+  const p = el('p', { class: 'fine' }, '');
+  const tick = () => {
+    const remaining = app.netNextRetryAt ? app.netNextRetryAt - Date.now() : 0;
+    p.textContent = remaining > 0 ? `Retrying in ${Math.ceil(remaining / 1000)}s…` : 'Retrying…';
+  };
+  tick();
+  if (_ticker) { clearInterval(_ticker); _ticker = null; }
+  _ticker = setInterval(tick, 250);
+  return p;
 }
 
 function messageScreen(title, body, intents) {

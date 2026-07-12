@@ -40,6 +40,7 @@ const app = {
   netStatus: 'online',   // online | reconnecting
   netError: '',          // set when the broker/handshake is unreachable
   netGaveUp: false,      // true once we've exhausted automatic reconnect tries
+  netNextRetryAt: 0,     // epoch ms of the next scheduled reconnect attempt
   error: '',
   toast: '',
   nameInput: loadName(),
@@ -61,6 +62,14 @@ let turnTimer = null;   // host only: fires when a describe turn's time is up
 const RECONNECT_MAX_TRIES = 6;
 const RECONNECT_BASE_MS = 1500;
 const RECONNECT_MAX_MS = 20000;
+
+// Delay before the next attempt: exponential in `tries`, capped, then jittered
+// by ±20% so a whole room that dropped together doesn't retry in lockstep and
+// stampede the broker. `tries` of 0 means the very first attempt.
+function reconnectDelay(tries) {
+  const base = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.max(0, tries - 1));
+  return Math.round(base * (0.8 + Math.random() * 0.4));
+}
 
 // ---------------------------------------------------------------------------
 // Render
@@ -176,7 +185,7 @@ function startHost(code, snap) {
   host = createHost(code, {
     onNetStatus: (s) => {
       app.netStatus = s === 'online' ? 'online' : 'reconnecting';
-      if (s === 'online') { app.netError = ''; app.netGaveUp = false; reconnectTries = 0; }
+      if (s === 'online') { app.netError = ''; app.netGaveUp = false; app.netNextRetryAt = 0; reconnectTries = 0; }
       draw();
     },
     onOpen: () => {
@@ -184,6 +193,7 @@ function startHost(code, snap) {
       app.netStatus = 'online';
       app.netError = '';
       app.netGaveUp = false;
+      app.netNextRetryAt = 0;
       reconnectTries = 0;
       saveSession({ role: 'host', code, name: app.nameInput });
       hostSync();
@@ -234,13 +244,14 @@ function startJoin(code) {
   client = joinHost(code, {
     onNetStatus: (s) => {
       app.netStatus = s === 'online' ? 'online' : 'reconnecting';
-      if (s === 'online') { app.netError = ''; app.netGaveUp = false; reconnectTries = 0; }
+      if (s === 'online') { app.netError = ''; app.netGaveUp = false; app.netNextRetryAt = 0; reconnectTries = 0; }
       draw();
     },
     onOpen: () => {
       app.netStatus = 'online';
       app.netError = '';
       app.netGaveUp = false;
+      app.netNextRetryAt = 0;
       reconnectTries = 0;
       client.send({ type: 'join', name: app.nameInput, clientId });
       draw();
@@ -264,6 +275,7 @@ function handleClientMessage(msg) {
       app.netStatus = 'online';
       app.netError = '';
       app.netGaveUp = false;
+      app.netNextRetryAt = 0;
       reconnectTries = 0;
       app.pub = msg.pub;
       app.priv = msg.priv;
@@ -312,6 +324,12 @@ function handleClientError(err) {
 function scheduleReconnect() {
   if (reconnectTimer) return;
 
+  const schedule = () => {
+    const delay = reconnectDelay(reconnectTries);
+    app.netNextRetryAt = Date.now() + delay;
+    reconnectTimer = setTimeout(attempt, delay);
+  };
+
   const attempt = () => {
     reconnectTimer = null;
     const amHost = !!(app.me && app.me.isHost);
@@ -321,6 +339,7 @@ function scheduleReconnect() {
     if (t.isOpen()) {
       reconnectTries = 0;
       app.netStatus = 'online'; app.netError = ''; app.netGaveUp = false;
+      app.netNextRetryAt = 0;
       draw();
       return;
     }
@@ -330,6 +349,7 @@ function scheduleReconnect() {
       // the user a manual retry / exit instead of an endless silent spinner.
       app.netStatus = 'reconnecting';
       app.netGaveUp = true;
+      app.netNextRetryAt = 0;
       draw();
       return;
     }
@@ -342,11 +362,10 @@ function scheduleReconnect() {
       try { t.reconnect(); } catch (_) {}
     }
 
-    const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** (reconnectTries - 1));
-    reconnectTimer = setTimeout(attempt, delay);
+    schedule();
   };
 
-  reconnectTimer = setTimeout(attempt, RECONNECT_BASE_MS);
+  schedule();
 }
 
 // ---------------------------------------------------------------------------
@@ -370,6 +389,7 @@ function resetToHome() {
   app.netStatus = 'online';
   app.netError = '';
   app.netGaveUp = false;
+  app.netNextRetryAt = 0;
   app.error = '';
   draw();
 }
