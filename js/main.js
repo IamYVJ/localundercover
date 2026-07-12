@@ -39,6 +39,7 @@ const app = {
   priv: null,            // engine.privateStateFor(me.id)
   netStatus: 'online',   // online | reconnecting
   netError: '',          // set when the broker/handshake is unreachable
+  netGaveUp: false,      // true once we've exhausted automatic reconnect tries
   error: '',
   toast: '',
   nameInput: loadName(),
@@ -50,8 +51,16 @@ let engine = null;   // host only
 let host = null;      // createHost(...) result (host transport)
 let client = null;    // joinHost(...) result (client transport)
 let reconnectTimer = null;
+let reconnectTries = 0; // consecutive automatic reconnect attempts so far
 let toastTimer = null;
 let turnTimer = null;   // host only: fires when a describe turn's time is up
+
+// Reconnect backoff: start gentle, double each miss, cap the wait, and stop
+// after a bounded number of tries so a permanently-down broker doesn't spin
+// (and hammer the server) forever. A manual "Try again" resets the budget.
+const RECONNECT_MAX_TRIES = 6;
+const RECONNECT_BASE_MS = 1500;
+const RECONNECT_MAX_MS = 20000;
 
 // ---------------------------------------------------------------------------
 // Render
@@ -167,13 +176,15 @@ function startHost(code, snap) {
   host = createHost(code, {
     onNetStatus: (s) => {
       app.netStatus = s === 'online' ? 'online' : 'reconnecting';
-      if (s === 'online') app.netError = '';
+      if (s === 'online') { app.netError = ''; app.netGaveUp = false; reconnectTries = 0; }
       draw();
     },
     onOpen: () => {
       app.screen = 'room';
       app.netStatus = 'online';
       app.netError = '';
+      app.netGaveUp = false;
+      reconnectTries = 0;
       saveSession({ role: 'host', code, name: app.nameInput });
       hostSync();
     },
@@ -223,12 +234,14 @@ function startJoin(code) {
   client = joinHost(code, {
     onNetStatus: (s) => {
       app.netStatus = s === 'online' ? 'online' : 'reconnecting';
-      if (s === 'online') app.netError = '';
+      if (s === 'online') { app.netError = ''; app.netGaveUp = false; reconnectTries = 0; }
       draw();
     },
     onOpen: () => {
       app.netStatus = 'online';
       app.netError = '';
+      app.netGaveUp = false;
+      reconnectTries = 0;
       client.send({ type: 'join', name: app.nameInput, clientId });
       draw();
     },
@@ -249,6 +262,9 @@ function handleClientMessage(msg) {
     case 'state':
       app.screen = 'room';
       app.netStatus = 'online';
+      app.netError = '';
+      app.netGaveUp = false;
+      reconnectTries = 0;
       app.pub = msg.pub;
       app.priv = msg.priv;
       if (app.me && msg.priv && msg.priv.id) app.me.id = msg.priv.id;
@@ -288,36 +304,57 @@ function handleClientError(err) {
   draw();
 }
 
-// Keep trying to re-reach the broker. Works for both roles: the host retries on
-// its room-code peer, a client on its anonymous peer. If PeerJS has torn the
-// peer down entirely (it can't be reconnect()-ed), rebuild it from scratch.
+// Keep trying to re-reach the broker with exponential backoff. Works for both
+// roles: the host retries on its room-code peer, a client on its anonymous peer.
+// If PeerJS has torn the peer down entirely (it can't be reconnect()-ed), rebuild
+// it from scratch. After RECONNECT_MAX_TRIES we stop and let the UI offer a
+// manual retry, rather than spinning (and hammering the server) indefinitely.
 function scheduleReconnect() {
   if (reconnectTimer) return;
-  const stop = () => { clearInterval(reconnectTimer); reconnectTimer = null; };
-  reconnectTimer = setInterval(() => {
+
+  const attempt = () => {
+    reconnectTimer = null;
     const amHost = !!(app.me && app.me.isHost);
     const t = amHost ? host : client;
-    if (!t) { stop(); return; }
+    if (!t) return;
+
     if (t.isOpen()) {
-      stop();
-      app.netStatus = 'online'; app.netError = ''; draw();
+      reconnectTries = 0;
+      app.netStatus = 'online'; app.netError = ''; app.netGaveUp = false;
+      draw();
       return;
     }
+
+    if (reconnectTries >= RECONNECT_MAX_TRIES) {
+      // Broker looks genuinely unreachable — stop the automatic loop and hand
+      // the user a manual retry / exit instead of an endless silent spinner.
+      app.netStatus = 'reconnecting';
+      app.netGaveUp = true;
+      draw();
+      return;
+    }
+
+    reconnectTries += 1;
     if (t.isDestroyed && t.isDestroyed()) {
-      stop();
       if (amHost) startHost(app.code, engine ? engine.serialize() : loadEngineSnapshot());
       else startJoin(app.code);
-      return;
+    } else {
+      try { t.reconnect(); } catch (_) {}
     }
-    try { t.reconnect(); } catch (_) {}
-  }, 2500);
+
+    const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** (reconnectTries - 1));
+    reconnectTimer = setTimeout(attempt, delay);
+  };
+
+  reconnectTimer = setTimeout(attempt, RECONNECT_BASE_MS);
 }
 
 // ---------------------------------------------------------------------------
 // Teardown / navigation
 // ---------------------------------------------------------------------------
 function teardown() {
-  if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  reconnectTries = 0;
   if (turnTimer) { clearTimeout(turnTimer); turnTimer = null; }
   if (host) { try { host.destroy(); } catch (_) {} host = null; }
   if (client) { try { client.destroy(); } catch (_) {} client = null; }
@@ -332,6 +369,7 @@ function resetToHome() {
   app.code = '';
   app.netStatus = 'online';
   app.netError = '';
+  app.netGaveUp = false;
   app.error = '';
   draw();
 }
@@ -424,6 +462,10 @@ const intents = {
   goHome,
   leave,
   retryNow: () => {
+    // A manual retry gets a fresh budget and restarts the backoff loop.
+    reconnectTries = 0;
+    app.netGaveUp = false;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     const t = app.me && app.me.isHost ? host : client;
     if (t) { try { t.reconnect(); } catch (_) {} }
     scheduleReconnect();

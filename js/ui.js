@@ -45,7 +45,12 @@ export function render(root, app, intents) {
   // Overlays. The connecting screen already spells out the reconnect state, so
   // the floating banner would just be noise there.
   if (app.netStatus === 'reconnecting' && app.screen !== 'connecting') {
-    root.appendChild(el('div', { class: 'net-banner' }, 'Reconnecting…'));
+    // Once auto-retry has given up, make the banner an actionable retry rather
+    // than a spinner that never resolves.
+    root.appendChild(app.netGaveUp
+      ? el('div', { class: 'net-banner net-banner-stuck', onclick: () => intents.retryNow() },
+          "Can't reconnect — tap to try again")
+      : el('div', { class: 'net-banner' }, 'Reconnecting…'));
   }
   if (app.showRules) root.appendChild(rulesModal(intents));
   root.appendChild(peekOverlay(app));
@@ -101,10 +106,13 @@ function connectingScreen(app, intents) {
   // rather than an indefinite "Joining…" that looks frozen.
   if (app.netError) {
     return el('div', { class: 'field-group' },
-      el('div', { class: 'wordmark' }, el('span', { class: 'wordmark-dot' }), 'RECONNECTING'),
+      el('div', { class: 'wordmark' }, el('span', { class: 'wordmark-dot' }),
+        app.netGaveUp ? 'OFFLINE' : 'RECONNECTING'),
       el('h1', { class: 'hero hero-sm' }, "Can't reach the server"),
       el('p', { class: 'tagline' }, app.netError),
-      el('p', { class: 'fine' }, 'Retrying automatically…'),
+      el('p', { class: 'fine' },
+        app.netGaveUp ? 'Gave up after several tries — check your connection, then try again.'
+                      : 'Retrying automatically…'),
       intents && intents.retryNow
         ? el('button', { class: 'btn btn-primary btn-block', onclick: () => intents.retryNow() }, 'Try again now')
         : null,

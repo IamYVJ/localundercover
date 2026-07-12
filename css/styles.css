@@ -298,6 +298,12 @@ body {
   font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em;
   text-align: center; padding: 8px 12px;
 }
+.net-banner-stuck {
+  background: var(--uc-dim);
+  border-bottom-color: var(--uc);
+  color: var(--uc);
+  cursor: pointer;
+}
 
 /* --- Hold-to-reveal card (role reveal) ----------------------------------- */
 .hold-card {
