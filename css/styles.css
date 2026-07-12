@@ -401,6 +401,7 @@ body {
   border: 1px solid var(--border-soft); color: var(--muted); background: var(--surface-2);
 }
 .chip.done { color: var(--civ); border-color: var(--civ); background: var(--civ-dim); }
+.chip.offline { color: var(--muted); border-color: var(--border-soft); background: transparent; opacity: 0.55; text-decoration: line-through; }
 
 /* --- Vote tally --------------------------------------------------------- */
 .tally-row {

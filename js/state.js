@@ -127,10 +127,17 @@ export class GameEngine {
       // In the lobby a dropped player just leaves their seat.
       this.players = this.players.filter((x) => x.id !== id);
       this._reclampConfig();
-    } else {
-      p.online = false;
+      return;
     }
+    p.online = false;
+    // A drop must never freeze the round: skip a vanished speaker, and re-check
+    // the vote so we don't wait on someone who's no longer here.
+    if (this.phase === PHASES.DESCRIBE) this._settleDescribeTurn(false);
+    else if (this.phase === PHASES.VOTE) this._maybeResolveVote();
   }
+
+  // Players who are expected to act this round — alive AND still connected.
+  _expectedVoters() { return this.players.filter((p) => p.alive && p.online); }
 
   removePlayer(id) {
     if (this.phase !== PHASES.LOBBY) return { ok: false, error: 'Can only remove players in the lobby.' };
@@ -224,8 +231,32 @@ export class GameEngine {
     this.players.forEach((p) => { p.hasSpoken = false; });
     this.reveal = null;
     this.phase = PHASES.DESCRIBE;
-    this._armTurnClock();
-    this._log(`Round ${this.round}: describing begins with ${this.getPlayer(starterId)?.name || '—'}.`);
+    this._settleDescribeTurn(true); // skip any offline leaders + arm the turn clock
+    if (this.phase === PHASES.DESCRIBE) {
+      const cur = this.getPlayer(this.speaking.order[this.speaking.idx]);
+      this._log(`Round ${this.round}: describing begins with ${cur?.name || '—'}.`);
+    }
+  }
+
+  // Walk the speaking cursor past anyone who has dropped. Returns true if the
+  // order is exhausted (everyone remaining is offline) so the caller can move on.
+  _skipOfflineSpeakers() {
+    while (this.speaking.idx < this.speaking.order.length) {
+      const p = this.getPlayer(this.speaking.order[this.speaking.idx]);
+      if (p && p.online) return false; // landed on a connected speaker
+      this.speaking.idx += 1;
+    }
+    return true;
+  }
+
+  // Settle onto a valid current speaker. Re-arm the turn clock when the turn
+  // actually changes (or when `forceArm` — a fresh turn is starting); begin the
+  // vote if no connected speakers remain.
+  _settleDescribeTurn(forceArm) {
+    if (this.phase !== PHASES.DESCRIBE || !this.speaking) return;
+    const before = this.speaking.idx;
+    if (this._skipOfflineSpeakers()) { this._beginVote(); return; }
+    if (forceArm || this.speaking.idx !== before) this._armTurnClock();
   }
 
   // Stamp the current speaker's deadline. When the timer is off both fields are
@@ -251,8 +282,7 @@ export class GameEngine {
     const p = this.getPlayer(current);
     if (p) p.hasSpoken = true;
     this.speaking.idx += 1;
-    if (this.speaking.idx >= this.speaking.order.length) this._beginVote();
-    else this._armTurnClock();
+    this._settleDescribeTurn(true); // advance (skipping any offline players) + arm
     return { ok: true };
   }
 
@@ -279,11 +309,18 @@ export class GameEngine {
     if (!target || !target.alive) return { ok: false, error: 'That player is already out.' };
 
     this.vote.ballots[voterId] = targetId;
-
-    const aliveVoters = this.alivePlayers();
-    const allVoted = aliveVoters.every((p) => this.vote.ballots[p.id]);
-    if (allVoted) this._resolveVote();
+    this._maybeResolveVote();
     return { ok: true };
+  }
+
+  // Resolve as soon as every *connected* living player has voted — offline
+  // players never block the tally (the host can still force it early).
+  _maybeResolveVote() {
+    if (this.phase !== PHASES.VOTE || !this.vote) return;
+    const expected = this._expectedVoters();
+    if (expected.length > 0 && expected.every((p) => this.vote.ballots[p.id])) {
+      this._resolveVote();
+    }
   }
 
   forceResolveVote(actorId) {
@@ -562,8 +599,11 @@ export class GameEngine {
         round: this.vote.round,
         isRunoff: this.vote.round === 'runoff',
         candidates: this.vote.candidates,
-        // Who has voted, never how they voted.
-        progress: this.alivePlayers().map((p) => ({ id: p.id, voted: !!this.vote.ballots[p.id] })),
+        // Who has voted, never how they voted. `online` lets the UI show that
+        // offline players aren't being waited on.
+        progress: this.alivePlayers().map((p) => ({
+          id: p.id, voted: !!this.vote.ballots[p.id], online: p.online,
+        })),
       };
     }
 

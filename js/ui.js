@@ -422,8 +422,10 @@ function voteScreen(app, intents) {
   const priv = app.priv;
   const v = pub.vote || { candidates: [], progress: [], isRunoff: false };
   const iAmAlive = priv && priv.alive;
-  const votedCount = v.progress.filter((x) => x.voted).length;
-  const aliveCount = v.progress.length;
+  // Only connected players are being waited on; offline ones can't vote.
+  const waiting = v.progress.filter((x) => x.online !== false);
+  const votedCount = waiting.filter((x) => x.voted).length;
+  const aliveCount = waiting.length;
 
   const wrap = el('div', { class: 'field-group' });
   wrap.appendChild(roomHeader(app, `ROUND ${pub.round} · VOTE`));
@@ -458,7 +460,9 @@ function voteScreen(app, intents) {
     el('div', { class: 'card-label' }, `${votedCount} / ${aliveCount} voted`),
     el('div', { class: 'progress-chips' }, ...v.progress.map((x) => {
       const p = pub.players.find((pp) => pp.id === x.id);
-      return el('span', { class: 'chip' + (x.voted ? ' done' : '') }, p ? p.name : '—');
+      const offline = x.online === false;
+      const cls = 'chip' + (offline ? ' offline' : x.voted ? ' done' : '');
+      return el('span', { class: cls }, (p ? p.name : '—') + (offline ? ' · offline' : ''));
     }))));
 
   if (isHost(app) && votedCount < aliveCount) {

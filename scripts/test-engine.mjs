@@ -503,5 +503,99 @@ function firstCivAlive(g) { return g.alivePlayers().find((p) => p.roleId === ROL
 }
 
 // ===========================================================================
+// OFFLINE PLAYERS (a drop must never freeze the round)
+// ===========================================================================
+
+// A vote resolves without ever waiting on an offline living player.
+{
+  const g = setup(5, { undercover: 1, mrwhite: 0 }, 21);
+  readyAll(g);
+  describeAll(g);
+  eq(g.phase, PHASES.VOTE, 'offline vote: reached vote');
+  const alive = g.alivePlayers().map((p) => p.id);
+  const offlineId = alive[0];
+  g.markOffline(offlineId);
+  eq(g.phase, PHASES.VOTE, 'offline vote: still open right after a player drops');
+  const connected = alive.filter((id) => id !== offlineId);
+  const target = connected[0];
+  for (const id of connected) g.castVote(id, id === target ? connected[1] : target);
+  eq(g.phase, PHASES.REVEAL, 'offline vote: resolves once every connected player has voted');
+}
+
+// Dropping the last un-voted player mid-vote triggers immediate resolution.
+{
+  const g = setup(5, { undercover: 1, mrwhite: 0 }, 33);
+  readyAll(g);
+  describeAll(g);
+  eq(g.phase, PHASES.VOTE, 'offline midvote: reached vote');
+  const alive = g.alivePlayers().map((p) => p.id);
+  const holdout = alive[4];
+  const target = alive[0];
+  for (const id of alive) {
+    if (id === holdout) continue;
+    g.castVote(id, id === target ? alive[1] : target);
+  }
+  eq(g.phase, PHASES.VOTE, 'offline midvote: open while a connected player has not voted');
+  g.markOffline(holdout);
+  eq(g.phase, PHASES.REVEAL, 'offline midvote: dropping the holdout resolves the tally');
+}
+
+// Describing auto-skips a speaker who drops on their turn.
+{
+  const g = setup(5, { undercover: 1, mrwhite: 0 }, 55);
+  readyAll(g);
+  eq(g.phase, PHASES.DESCRIBE, 'offline describe: reached describe');
+  const first = g.publicState().describe.currentSpeakerId;
+  g.markOffline(first);
+  const d2 = g.publicState().describe;
+  ok(d2.currentSpeakerId !== first, 'offline describe: cursor advances past the dropped speaker');
+  ok(g.getPlayer(d2.currentSpeakerId).online, 'offline describe: the new current speaker is online');
+}
+
+// Describing jumps straight to the vote when every remaining speaker is gone.
+{
+  const g = setup(4, { undercover: 1, mrwhite: 0 }, 77);
+  readyAll(g);
+  eq(g.phase, PHASES.DESCRIBE, 'offline all-drop: reached describe');
+  for (const id of [...g.speaking.order]) g.markOffline(id);
+  eq(g.phase, PHASES.VOTE, 'offline all-drop: an exhausted speaking order moves to the vote');
+}
+
+// An offline player never blocks the ready->describe gate, and the round opens
+// on someone who is actually connected.
+{
+  const g = setup(6, { undercover: 1, mrwhite: 0 }, 88);
+  eq(g.phase, PHASES.ROLE_REVEAL, 'offline start: in role reveal');
+  g.markOffline('p3'); // drops during reveal — the seat is kept, unlike the lobby
+  for (const p of g.players) if (p.online) g.setReady(p.id);
+  eq(g.phase, PHASES.DESCRIBE, 'offline start: offline player never readies, round still begins');
+  const cur = g.getPlayer(g.publicState().describe.currentSpeakerId);
+  ok(cur && cur.online, 'offline start: describing begins with an online player');
+}
+
+// vote.progress carries an `online` flag so the UI can stop waiting on drops.
+{
+  const g = setup(5, { undercover: 1, mrwhite: 0 }, 99);
+  readyAll(g);
+  describeAll(g);
+  eq(g.phase, PHASES.VOTE, 'offline progress: reached vote');
+  const alive = g.alivePlayers().map((p) => p.id);
+  g.markOffline(alive[0]);
+  const prog = g.publicState().vote.progress;
+  eq(prog.find((x) => x.id === alive[0]).online, false, 'offline progress: dropped player flagged online:false');
+  ok(prog.filter((x) => x.id !== alive[0]).every((x) => x.online === true), 'offline progress: connected players stay online:true');
+}
+
+// A drop in the lobby simply frees the seat (no phase machinery to unstick).
+{
+  const g = new GameEngine({ rng: rng(4) });
+  for (let i = 0; i < 5; i++) g.addPlayer({ id: 'p'+i, name: 'P'+i, clientId: 'c'+i, isHost: i === 0 });
+  eq(g.phase, PHASES.LOBBY, 'offline lobby: still in lobby');
+  g.markOffline('p3');
+  eq(g.players.length, 4, 'offline lobby: a dropped player leaves their seat');
+  ok(!g.getPlayer('p3'), 'offline lobby: the seat is gone, not just flagged');
+}
+
+// ===========================================================================
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
