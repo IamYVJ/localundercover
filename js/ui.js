@@ -153,6 +153,9 @@ function lobbyScreen(app, intents) {
   }, app.code || '····'));
   wrap.appendChild(el('p', { class: 'fine', style: 'text-align:center' },
     'Share this code. Everyone joins on the same Wi-Fi. Tap the code to copy.'));
+  wrap.appendChild(el('button', {
+    class: 'btn btn-secondary btn-block', onclick: () => intents.shareLink(),
+  }, 'Share invite link'));
 
   // Roster.
   const list = el('ul', { class: 'player-list' });

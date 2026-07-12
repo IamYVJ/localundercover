@@ -320,6 +320,39 @@ async function copyCode() {
   showToast(ok ? 'Code copied' : app.code);
 }
 
+// A join link carries the room code so friends skip typing it: they land on
+// the home screen with the code pre-filled and just add their name.
+function inviteLink(code) {
+  return location.origin + location.pathname + '?code=' + encodeURIComponent(code);
+}
+
+async function shareLink() {
+  if (!app.code) return;
+  const url = inviteLink(app.code);
+  const data = { title: 'Undercover', text: `Join my Undercover game — code ${app.code}`, url };
+  if (navigator.share) {
+    try { await navigator.share(data); return; }
+    catch (e) { if (e && e.name === 'AbortError') return; /* else fall back to copy */ }
+  }
+  const ok = await copyText(url);
+  showToast(ok ? 'Invite link copied' : url);
+}
+
+// Read a room code from ?code=… (or a #code=… / #CODE hash), then scrub it from
+// the address bar so a later "Create game" doesn't inherit a stale code.
+function readCodeFromUrl() {
+  try {
+    let raw = new URLSearchParams(location.search).get('code') || '';
+    if (!raw && location.hash) {
+      const h = location.hash.slice(1);
+      raw = h.startsWith('code=') ? h.slice(5) : h;
+    }
+    const code = normalizeCode(raw);
+    if (code) { try { history.replaceState(null, '', location.pathname); } catch (_) {} }
+    return code;
+  } catch (_) { return ''; }
+}
+
 // ---------------------------------------------------------------------------
 // Intents handed to ui.js
 // ---------------------------------------------------------------------------
@@ -333,6 +366,7 @@ const intents = {
   showRules: () => { app.showRules = true; draw(); },
   hideRules: () => { app.showRules = false; draw(); },
   copyCode,
+  shareLink,
 
   // lobby / config (host)
   setCategory: (id) => act({ type: 'config', category: id }),
@@ -365,6 +399,8 @@ function boot() {
     startJoin(s.code);
     return;
   }
+  const linkCode = readCodeFromUrl();
+  if (linkCode) app.codeInput = linkCode;
   draw();
 }
 
