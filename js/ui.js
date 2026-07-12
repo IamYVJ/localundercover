@@ -88,15 +88,18 @@ function homeScreen(app, intents) {
   if (serverConfigured()) {
     const online = app.serverProbe === 'online';
     const pending = app.serverProbe === 'pending';
-    wrap.appendChild(el('div', { style: 'display:flex;justify-content:center' },
-      el('span', {
-        class: 'pill' + (online ? ' accent' : ''),
-        title: online
-          ? 'The game server is reachable — you can host a room players join from anywhere.'
-          : pending
-            ? 'Checking whether the game server is reachable…'
-            : 'The game server is unreachable right now — only same-Wi-Fi games are available.',
-      }, online ? 'Server online' : pending ? 'Checking server…' : 'Server offline')));
+    const label = online ? 'Server online' : pending ? 'Checking server…' : 'Server offline';
+    const pill = el('span', {
+      class: 'pill' + (online ? ' accent' : ''),
+      style: 'cursor:pointer',
+      onclick: () => intents.recheckServer(),
+      title: pending
+        ? 'Checking whether the game server is reachable…'
+        : online
+          ? 'The game server is reachable — you can host a room players join from anywhere. Tap to re-check.'
+          : 'The game server is unreachable right now — only same-Wi-Fi games are available. Tap to re-check.',
+    }, label, pending ? null : el('span', { style: 'opacity:0.7' }, '↻'));
+    wrap.appendChild(el('div', { style: 'display:flex;justify-content:center' }, pill));
   }
 
   // Offered only when the game server answered its health probe. Peer-to-peer

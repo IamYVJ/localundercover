@@ -671,6 +671,7 @@ const intents = {
   hideRules: () => { app.showRules = false; draw(); },
   copyCode,
   shareLink,
+  recheckServer: () => { checkServerHealth(); },
 
   // lobby / config (host)
   setCategory: (id) => act({ type: 'config', category: id }),
@@ -755,8 +756,12 @@ function resumeOrHome() {
 
 // Probe the game server so the home screen can offer "Host on server". Cheap,
 // best-effort and time-boxed: if it doesn't answer fast, we stay peer-to-peer.
+let _healthProbing = false;
 async function checkServerHealth() {
-  if (!serverConfigured()) return;
+  if (!serverConfigured() || _healthProbing) return; // guard against overlapping probes
+  _healthProbing = true;
+  app.serverProbe = 'pending';                        // show "Checking…" for manual re-checks
+  if (app.screen === 'home') draw();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 1500);
   try {
@@ -766,6 +771,7 @@ async function checkServerHealth() {
     app.serverAvailable = false;
   } finally {
     clearTimeout(timer);
+    _healthProbing = false;
   }
   app.serverProbe = app.serverAvailable ? 'online' : 'offline';
   if (app.screen === 'home') draw();
