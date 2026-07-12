@@ -1,9 +1,9 @@
 // Correctness harness for the pure rules + host engine. No DOM, no network.
 // Run: node scripts/test-engine.mjs
 import {
-  MIN_PLAYERS, MAX_PLAYERS, ROLES, TIE_BREAK,
+  MIN_PLAYERS, MAX_PLAYERS, ROLES, TIE_BREAK, TIMER,
   defaultRoleConfig, validateRoleConfig, maxUndercover, buildRoleDeck, shuffle,
-  assignWordPair, wordForRole, checkWinner, chooseStarter, wordsMatch,
+  assignWordPair, wordForRole, checkWinner, chooseStarter, wordsMatch, clampTimerSeconds,
 } from '../js/rules.js';
 import { GameEngine, PHASES } from '../js/state.js';
 import { MIXED } from '../js/words.js';
@@ -113,6 +113,13 @@ ok(wordsMatch('Coffee', 'coffee'), 'case-insensitive match');
 ok(wordsMatch('  ICE cream ', 'Ice Cream'), 'trims + collapses spaces + punctuation');
 ok(!wordsMatch('Tea', 'Coffee'), 'different words do not match');
 ok(!wordsMatch('', 'Coffee'), 'empty guess never matches');
+
+// clampTimerSeconds: snaps to STEP and stays within [MIN, MAX].
+eq(clampTimerSeconds(30), 30, 'timer 30 stays 30');
+eq(clampTimerSeconds(5), TIMER.MIN, 'timer below min clamps up');
+eq(clampTimerSeconds(999), TIMER.MAX, 'timer above max clamps down');
+eq(clampTimerSeconds(32), 30, 'timer snaps to nearest step');
+eq(clampTimerSeconds('abc'), TIMER.DEFAULT, 'non-numeric timer -> default');
 
 // ===========================================================================
 // ENGINE
@@ -433,6 +440,66 @@ function firstCivAlive(g) { return g.alivePlayers().find((p) => p.roleId === ROL
   eq(JSON.stringify(g2.history), JSON.stringify(g.history), 'recap: history round-trips through serialize');
   g.playAgain(g.hostId);
   eq(g.history.length, 0, 'recap: playAgain clears history');
+}
+
+// ===========================================================================
+// TURN TIMER
+// ===========================================================================
+
+// Off by default: describe turns carry no deadline.
+{
+  const g = setup(4, { undercover: 1, mrwhite: 0 }, 3);
+  eq(g.config.timer, false, 'timer off by default');
+  readyAll(g);
+  const d = g.publicState().describe;
+  eq(d.endsAt, null, 'timer off: no deadline on the turn');
+  eq(d.seconds, null, 'timer off: no seconds on the turn');
+}
+
+// setConfig toggles the timer and clamps the duration (lobby only).
+{
+  const g = new GameEngine({ rng: rng(9) });
+  for (let i = 0; i < 4; i++) g.addPlayer({ id: 'p'+i, name: 'P'+i, clientId: 'c'+i, isHost: i === 0 });
+  g.setConfig(g.hostId, { timer: true, timerSeconds: 999 });
+  eq(g.config.timer, true, 'timer enabled via setConfig');
+  eq(g.config.timerSeconds, TIMER.MAX, 'setConfig clamps duration to max');
+  g.setConfig(g.hostId, { timerSeconds: 3 });
+  eq(g.config.timerSeconds, TIMER.MIN, 'setConfig clamps duration to min');
+  g.setConfig(g.hostId, { timer: false });
+  eq(g.config.timer, false, 'timer can be turned back off');
+}
+
+// When enabled, each turn gets an absolute deadline that re-arms on advance.
+{
+  let clock = 1_000_000;
+  const g = new GameEngine({ rng: rng(3), now: () => clock });
+  for (let i = 0; i < 4; i++) g.addPlayer({ id: 'p'+i, name: 'P'+i, clientId: 'c'+i, isHost: i === 0 });
+  g.setConfig(g.hostId, { category: MIXED, undercover: 1, mrwhite: 0, timer: true, timerSeconds: 45 });
+  g.startGame(g.hostId);
+  readyAll(g);
+  eq(g.phase, PHASES.DESCRIBE, 'timer: reached describe');
+  const d1 = g.publicState().describe;
+  eq(d1.seconds, 45, 'timer: turn length exposed');
+  eq(d1.endsAt, clock + 45 * 1000, 'timer: deadline = now + duration');
+  clock += 10_000; // time passes before the speaker advances
+  g.advanceSpeaker(d1.currentSpeakerId);
+  const d2 = g.publicState().describe;
+  eq(d2.idx, 1, 'timer: advanced to the next speaker');
+  eq(d2.endsAt, clock + 45 * 1000, 'timer: deadline re-armed for the new turn');
+}
+
+// The timer config + live deadline survive serialize/restore.
+{
+  let clock = 500_000;
+  const g = new GameEngine({ rng: rng(7), now: () => clock });
+  for (let i = 0; i < 4; i++) g.addPlayer({ id: 'p'+i, name: 'P'+i, clientId: 'c'+i, isHost: i === 0 });
+  g.setConfig(g.hostId, { category: MIXED, undercover: 1, mrwhite: 0, timer: true, timerSeconds: 20 });
+  g.startGame(g.hostId);
+  readyAll(g);
+  const g2 = new GameEngine().restore(g.serialize());
+  eq(g2.config.timer, true, 'restore keeps timer flag');
+  eq(g2.config.timerSeconds, 20, 'restore keeps timer duration');
+  eq(g2.publicState().describe.endsAt, g.publicState().describe.endsAt, 'restore keeps the turn deadline');
 }
 
 // ===========================================================================

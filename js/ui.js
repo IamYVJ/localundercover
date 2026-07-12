@@ -8,11 +8,12 @@
 
 import { el, clear } from './util.js';
 import {
-  PHASES, TIE_BREAK, MIN_PLAYERS, MAX_PLAYERS, maxUndercover, describeRole,
+  PHASES, TIE_BREAK, TIMER, MIN_PLAYERS, MAX_PLAYERS, maxUndercover, describeRole,
 } from './rules.js';
 import { categoryOptions } from './words.js';
 
 let _lastKey = '';
+let _ticker = null; // active countdown interval (only one alive at a time)
 
 const TIE_LABELS = {
   [TIE_BREAK.RUNOFF]: 'Runoff',
@@ -22,6 +23,7 @@ const TIE_LABELS = {
 
 export function render(root, app, intents) {
   clear(root);
+  if (_ticker) { clearInterval(_ticker); _ticker = null; } // stop any old countdown
 
   const key = app.screen + ':' + (app.pub ? app.pub.phase : '');
   const shell = el('div', { class: 'shell' });
@@ -224,21 +226,45 @@ function hostConfigCard(app, intents) {
       onclick: () => intents.setTieBreak(mode),
     }, TIE_LABELS[mode])));
 
+  const timerOn = !!cfg.timer;
+  const timerToggle = el('button', {
+    class: 'btn ' + (timerOn ? 'btn-primary' : 'btn-secondary') + ' btn-block',
+    onclick: () => intents.setTimer(!timerOn),
+  }, timerOn ? 'Turn timer: ON' : 'Turn timer: OFF');
+
+  let timerSlider = null;
+  if (timerOn) {
+    const secs = cfg.timerSeconds || TIMER.DEFAULT;
+    const readout = el('div', { class: 'slider-readout' }, `${secs}s per turn`);
+    const slider = el('input', {
+      class: 'slider', type: 'range',
+      min: String(TIMER.MIN), max: String(TIMER.MAX), step: String(TIMER.STEP),
+      value: String(secs),
+      // Live-update the label while dragging; only broadcast on release.
+      oninput: (e) => { readout.textContent = `${e.target.value}s per turn`; },
+      onchange: (e) => intents.setTimerSeconds(Number(e.target.value)),
+    });
+    timerSlider = el('div', { class: 'slider-row' }, slider, readout);
+  }
+
   return el('div', { class: 'card' },
     el('div', { class: 'card-label' }, 'Word category'), select,
     el('div', { class: 'card-label' }, 'Undercover'), stepper,
     el('div', { class: 'card-label' }, 'Mr. White'), whiteToggle,
     el('div', { class: 'card-label' }, 'Vote-tie rule'), tieRow,
+    el('div', { class: 'card-label' }, 'Turn timer'), timerToggle, timerSlider,
     el('p', { class: 'fine' }, roleSummaryText(pub)));
 }
 
 function guestConfigCard(app) {
   const pub = app.pub;
   const cat = categoryOptions().find((c) => c.id === pub.config.category);
+  const timerText = pub.config.timer ? `${pub.config.timerSeconds}s per turn` : 'off';
   return el('div', { class: 'card' },
     el('div', { class: 'card-label' }, 'Setup'),
     el('p', { class: 'fine' }, roleSummaryText(pub)),
-    el('p', { class: 'fine' }, `Category: ${cat ? cat.name : '—'} · Ties: ${TIE_LABELS[pub.config.tieBreak]}`));
+    el('p', { class: 'fine' }, `Category: ${cat ? cat.name : '—'} · Ties: ${TIE_LABELS[pub.config.tieBreak]}`),
+    el('p', { class: 'fine' }, `Turn timer: ${timerText}`));
 }
 
 function roleSummaryText(pub) {
@@ -335,6 +361,8 @@ function describeScreen(app, intents) {
       ? 'Say ONE word or short phrase out loud that hints at your word — don’t say the word itself.'
       : 'Listen. Each player gives one clue about their word, in order.'));
 
+  if (d.endsAt) wrap.appendChild(countdownEl(d.endsAt, d.seconds, myTurn));
+
   // Speaking order with progress.
   const list = el('ul', { class: 'player-list' });
   d.order.forEach((id, i) => {
@@ -363,6 +391,27 @@ function describeScreen(app, intents) {
 
   wrap.appendChild(leaveRow(app, intents));
   return wrap;
+}
+
+// A local countdown to an absolute deadline (endsAt, epoch ms). Ticks via a
+// single module-level interval that render() clears on the next redraw.
+function countdownEl(endsAt, seconds, myTurn) {
+  const total = Math.max(1, (seconds || TIMER.DEFAULT) * 1000);
+  const fill = el('div', { class: 'timer-bar-fill' });
+  const num = el('span', { class: 'timer-num' }, '');
+  const box = el('div', { class: 'timer' + (myTurn ? ' mine' : '') },
+    num, el('div', { class: 'timer-bar' }, fill));
+
+  const tick = () => {
+    const remaining = Math.max(0, endsAt - Date.now());
+    num.textContent = Math.ceil(remaining / 1000) + 's';
+    fill.style.width = Math.max(0, Math.min(100, (remaining / total) * 100)) + '%';
+    box.classList.toggle('low', remaining <= 5000);
+    if (remaining <= 0 && _ticker) { clearInterval(_ticker); _ticker = null; }
+  };
+  tick();
+  _ticker = setInterval(tick, 250);
+  return box;
 }
 
 // ---------------------------------------------------------------------------

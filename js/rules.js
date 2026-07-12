@@ -35,6 +35,22 @@ export const TIE_BREAK = {
   NONE: 'none',                  // a tie means nobody is eliminated this round
 };
 
+// Optional per-turn describe timer. When the host enables it, each speaker gets
+// `timerSeconds` to give their clue; on expiry the host auto-advances the turn.
+export const TIMER = {
+  MIN: 15,
+  MAX: 90,
+  STEP: 5,
+  DEFAULT: 30,
+};
+
+/** Snap a requested timer duration to the allowed [MIN, MAX] range and step. */
+export function clampTimerSeconds(v) {
+  let s = Math.round(Number(v) / TIMER.STEP) * TIMER.STEP;
+  if (!Number.isFinite(s)) s = TIMER.DEFAULT;
+  return Math.min(TIMER.MAX, Math.max(TIMER.MIN, s));
+}
+
 // Default (undercover, mrwhite) counts by player count. Civilians fill the
 // rest. Every default keeps civilians a strict majority so the game can't be
 // won on parity at the opening. Host can override within validation limits.

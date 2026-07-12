@@ -14,10 +14,10 @@
 // ============================================================================
 
 import {
-  ROLES, PHASES, TIE_BREAK, MIN_PLAYERS, MAX_PLAYERS,
+  ROLES, PHASES, TIE_BREAK, TIMER, MIN_PLAYERS, MAX_PLAYERS,
   validateRoleConfig, defaultRoleConfig, buildRoleDeck, shuffle,
   pickWordPair, assignWordPair, wordForRole, checkWinner, chooseStarter,
-  describeRole, wordsMatch,
+  describeRole, wordsMatch, clampTimerSeconds,
 } from './rules.js';
 import { MIXED } from './words.js';
 
@@ -28,10 +28,14 @@ const LOG_CAP = 60;
 export class GameEngine {
   constructor(opts = {}) {
     this._rng = opts.rng || Math.random;
+    this._now = opts.now || (() => Date.now()); // wall clock (for the turn timer)
     this.phase = PHASES.LOBBY;
     this.hostId = null;
     this.players = []; // seat order == array order
-    this.config = { category: MIXED, undercover: 1, mrwhite: 0, tieBreak: TIE_BREAK.RUNOFF_RANDOM };
+    this.config = {
+      category: MIXED, undercover: 1, mrwhite: 0, tieBreak: TIE_BREAK.RUNOFF_RANDOM,
+      timer: false, timerSeconds: TIMER.DEFAULT,
+    };
     this.words = null; // { civilianWord, undercoverWord } (secret)
     this.round = 0;
     this.speaking = null; // { order:[id], idx }
@@ -144,6 +148,8 @@ export class GameEngine {
     }
     if (partial.undercover !== undefined) this.config.undercover = Math.max(1, Math.floor(partial.undercover));
     if (partial.mrwhite !== undefined) this.config.mrwhite = partial.mrwhite ? 1 : 0;
+    if (partial.timer !== undefined) this.config.timer = !!partial.timer;
+    if (partial.timerSeconds !== undefined) this.config.timerSeconds = clampTimerSeconds(partial.timerSeconds);
     return { ok: true };
   }
 
@@ -218,7 +224,22 @@ export class GameEngine {
     this.players.forEach((p) => { p.hasSpoken = false; });
     this.reveal = null;
     this.phase = PHASES.DESCRIBE;
+    this._armTurnClock();
     this._log(`Round ${this.round}: describing begins with ${this.getPlayer(starterId)?.name || '—'}.`);
+  }
+
+  // Stamp the current speaker's deadline. When the timer is off both fields are
+  // null. `endsAt` is an absolute epoch (ms) so each device can count down
+  // locally; no rule decision depends on it.
+  _armTurnClock() {
+    if (!this.speaking) return;
+    if (this.config.timer) {
+      this.speaking.seconds = this.config.timerSeconds;
+      this.speaking.endsAt = this._now() + this.config.timerSeconds * 1000;
+    } else {
+      this.speaking.seconds = null;
+      this.speaking.endsAt = null;
+    }
   }
 
   advanceSpeaker(actorId) {
@@ -231,6 +252,7 @@ export class GameEngine {
     if (p) p.hasSpoken = true;
     this.speaking.idx += 1;
     if (this.speaking.idx >= this.speaking.order.length) this._beginVote();
+    else this._armTurnClock();
     return { ok: true };
   }
 
@@ -517,6 +539,8 @@ export class GameEngine {
         tieBreak: this.config.tieBreak,
         undercover: this.config.undercover,
         mrwhite: this.config.mrwhite,
+        timer: !!this.config.timer,
+        timerSeconds: this.config.timerSeconds,
       },
       roleCounts: { civilian: lobby.civilian, undercover: lobby.undercover, mrwhite: lobby.mrwhite },
       lobby: { valid: lobby.ok, error: lobby.error, canStart: lobby.ok && n >= MIN_PLAYERS },
@@ -528,6 +552,8 @@ export class GameEngine {
         order: this.speaking.order,
         idx: this.speaking.idx,
         currentSpeakerId: this.speaking.order[this.speaking.idx] || null,
+        endsAt: this.speaking.endsAt || null,   // epoch ms, or null when timer off
+        seconds: this.speaking.seconds || null, // configured turn length
       };
     }
 

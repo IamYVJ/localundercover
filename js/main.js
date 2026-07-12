@@ -18,7 +18,7 @@ import {
   saveSession, loadSession, clearSession,
   saveEngineSnapshot, loadEngineSnapshot,
 } from './util.js';
-import { GameEngine } from './state.js';
+import { GameEngine, PHASES } from './state.js';
 import {
   createHost, joinHost, isRecoverableError, describePeerError,
 } from './net.js';
@@ -50,6 +50,7 @@ let host = null;      // createHost(...) result (host transport)
 let client = null;    // joinHost(...) result (client transport)
 let reconnectTimer = null;
 let toastTimer = null;
+let turnTimer = null;   // host only: fires when a describe turn's time is up
 
 // ---------------------------------------------------------------------------
 // Render
@@ -122,6 +123,29 @@ function hostSync() {
     host.sendTo(connId, { type: 'state', pub: app.pub, priv: engine.privateStateFor(connId) });
   }
   saveEngineSnapshot(engine.serialize());
+  scheduleTurnTimer();
+}
+
+// Host-only: when the per-turn timer is on, auto-advance the current speaker the
+// moment their time runs out. The speaker (or host) can still advance early;
+// each redraw reschedules for whatever turn is now current.
+function scheduleTurnTimer() {
+  if (turnTimer) { clearTimeout(turnTimer); turnTimer = null; }
+  if (!engine || !app.me || !app.me.isHost) return;
+  const d = app.pub && app.pub.phase === PHASES.DESCRIBE ? app.pub.describe : null;
+  if (!d || !d.endsAt) return;
+  const fire = () => {
+    turnTimer = null;
+    const p = engine.publicState();
+    if (p.phase === PHASES.DESCRIBE && p.describe && p.describe.endsAt
+        && Date.now() >= p.describe.endsAt - 200) {
+      applyHostIntent(app.me.id, { type: 'advance' });
+      hostSync();
+    } else {
+      scheduleTurnTimer(); // clock moved on (e.g. resumed); re-arm
+    }
+  };
+  turnTimer = setTimeout(fire, Math.max(0, d.endsAt - Date.now()));
 }
 
 // ---------------------------------------------------------------------------
@@ -260,6 +284,7 @@ function scheduleReconnect() {
 // ---------------------------------------------------------------------------
 function teardown() {
   if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
+  if (turnTimer) { clearTimeout(turnTimer); turnTimer = null; }
   if (host) { try { host.destroy(); } catch (_) {} host = null; }
   if (client) { try { client.destroy(); } catch (_) {} client = null; }
   engine = null;
@@ -373,6 +398,8 @@ const intents = {
   setUndercover: (n) => act({ type: 'config', undercover: n }),
   setMrWhite: (b) => act({ type: 'config', mrwhite: b }),
   setTieBreak: (m) => act({ type: 'config', tieBreak: m }),
+  setTimer: (b) => act({ type: 'config', timer: b }),
+  setTimerSeconds: (n) => act({ type: 'config', timerSeconds: n }),
   startGame: () => act({ type: 'start' }),
   kick: (id) => act({ type: 'kick', target: id }),
 

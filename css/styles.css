@@ -349,6 +349,44 @@ body {
 }
 .turn-num.now { background: var(--accent); color: #1a1204; border-color: var(--accent); }
 
+/* --- Duration slider (lobby turn timer) --------------------------------- */
+.slider-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.slider {
+  flex: 1 1 auto; -webkit-appearance: none; appearance: none;
+  height: 4px; border-radius: 999px; background: var(--border); outline: none;
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); border: 2px solid #1a1204; cursor: pointer;
+}
+.slider::-moz-range-thumb {
+  width: 18px; height: 18px; border: 2px solid #1a1204; border-radius: 50%;
+  background: var(--accent); cursor: pointer;
+}
+.slider-readout {
+  flex: 0 0 auto; min-width: 92px; text-align: right;
+  font-family: var(--mono); font-size: 13px; color: var(--accent);
+}
+
+/* --- Per-turn countdown (describe phase) -------------------------------- */
+.timer { display: flex; align-items: center; gap: 12px; margin: 4px 0 2px; }
+.timer-num {
+  flex: 0 0 auto; min-width: 44px;
+  font-family: var(--mono); font-size: 22px; font-weight: 700; color: var(--accent);
+}
+.timer-bar {
+  flex: 1 1 auto; height: 8px; border-radius: 999px;
+  background: var(--surface-2); overflow: hidden;
+}
+.timer-bar-fill {
+  height: 100%; width: 100%; border-radius: 999px;
+  background: var(--accent); transition: width 0.25s linear;
+}
+.timer.mine .timer-num { color: var(--accent-hi); }
+.timer.low .timer-num { color: var(--uc); }
+.timer.low .timer-bar-fill { background: var(--uc); }
+
 /* --- Vote grid + progress chips ----------------------------------------- */
 .vote-grid {
   display: grid;
