@@ -14,6 +14,9 @@ export const CATEGORIES = [
       ['Ice Cream', 'Milkshake'], ['Butter', 'Margarine'], ['Jam', 'Honey'],
       ['Noodles', 'Spaghetti'], ['Sushi', 'Sashimi'], ['Lemon', 'Lime'],
       ['Beer', 'Wine'], ['Chocolate', 'Caramel'], ['Pancake', 'Waffle'],
+      ['Bread', 'Toast'], ['Ketchup', 'Mustard'], ['Soup', 'Stew'],
+      ['Yogurt', 'Cheese'], ['Donut', 'Bagel'], ['Whisky', 'Rum'],
+      ['Popcorn', 'Nachos'], ['Fries', 'Wedges'],
     ],
   },
   {
@@ -22,6 +25,9 @@ export const CATEGORIES = [
       ['Rabbit', 'Hare'], ['Crocodile', 'Alligator'], ['Turtle', 'Tortoise'],
       ['Bee', 'Wasp'], ['Butterfly', 'Moth'], ['Leopard', 'Cheetah'],
       ['Dolphin', 'Shark'], ['Crow', 'Raven'], ['Donkey', 'Mule'],
+      ['Horse', 'Zebra'], ['Lion', 'Panther'], ['Monkey', 'Gorilla'],
+      ['Duck', 'Goose'], ['Sheep', 'Goat'], ['Elephant', 'Rhino'],
+      ['Snail', 'Slug'], ['Eagle', 'Hawk'],
     ],
   },
   {
@@ -30,6 +36,9 @@ export const CATEGORIES = [
       ['Airport', 'Station'], ['Museum', 'Gallery'], ['Castle', 'Palace'],
       ['Village', 'Town'], ['River', 'Canal'], ['Bridge', 'Tunnel'],
       ['Park', 'Garden'], ['Island', 'Peninsula'], ['Cabin', 'Cottage'],
+      ['Library', 'Bookshop'], ['Restaurant', 'Cafe'], ['Forest', 'Jungle'],
+      ['Farm', 'Ranch'], ['Harbor', 'Pier'], ['Cave', 'Mine'],
+      ['Zoo', 'Aquarium'], ['Stadium', 'Arena'],
     ],
   },
   {
@@ -38,6 +47,9 @@ export const CATEGORIES = [
       ['Plate', 'Bowl'], ['Fork', 'Spoon'], ['Blanket', 'Quilt'],
       ['Curtain', 'Blind'], ['Mirror', 'Window'], ['Broom', 'Mop'],
       ['Candle', 'Lamp'], ['Clock', 'Watch'], ['Pillow', 'Cushion'],
+      ['Knife', 'Scissors'], ['Towel', 'Napkin'], ['Bucket', 'Basket'],
+      ['Bottle', 'Jar'], ['Fan', 'Heater'], ['Rug', 'Carpet'],
+      ['Kettle', 'Teapot'], ['Soap', 'Shampoo'],
     ],
   },
   {
@@ -46,6 +58,9 @@ export const CATEGORIES = [
       ['Lake', 'Pond'], ['Cloud', 'Smoke'], ['Storm', 'Hurricane'],
       ['Ice', 'Frost'], ['Leaf', 'Petal'], ['Rock', 'Pebble'],
       ['Wind', 'Breeze'], ['Volcano', 'Geyser'], ['Star', 'Comet'],
+      ['Thunder', 'Lightning'], ['Sand', 'Dust'], ['Ocean', 'Sea'],
+      ['Waterfall', 'Rapids'], ['Valley', 'Canyon'], ['Tornado', 'Whirlpool'],
+      ['Glacier', 'Iceberg'], ['Meadow', 'Prairie'],
     ],
   },
   {
@@ -54,6 +69,9 @@ export const CATEGORIES = [
       ['Boxing', 'Wrestling'], ['Ski', 'Snowboard'], ['Swimming', 'Diving'],
       ['Baseball', 'Cricket'], ['Marathon', 'Sprint'], ['Poker', 'Blackjack'],
       ['Darts', 'Archery'], ['Surfing', 'Sailing'], ['Hockey', 'Lacrosse'],
+      ['Basketball', 'Netball'], ['Golf', 'Croquet'], ['Cycling', 'Skating'],
+      ['Karate', 'Judo'], ['Bowling', 'Curling'], ['Volleyball', 'Handball'],
+      ['Rowing', 'Kayaking'], ['Climbing', 'Bouldering'],
     ],
   },
   {
@@ -62,6 +80,9 @@ export const CATEGORIES = [
       ['Drum', 'Tabla'], ['Painting', 'Sketch'], ['Novel', 'Comic'],
       ['Singer', 'Rapper'], ['Circus', 'Carnival'], ['Magician', 'Clown'],
       ['Ballet', 'Opera'], ['Trumpet', 'Saxophone'], ['Cinema', 'Theatre'],
+      ['Flute', 'Clarinet'], ['Poem', 'Song'], ['Sculpture', 'Statue'],
+      ['Cartoon', 'Anime'], ['Comedy', 'Drama'], ['Concert', 'Festival'],
+      ['Harp', 'Cello'], ['Mural', 'Graffiti'],
     ],
   },
   {
@@ -70,6 +91,9 @@ export const CATEGORIES = [
       ['Robot', 'Android'], ['Camera', 'Binoculars'], ['Headphones', 'Earbuds'],
       ['Keyboard', 'Typewriter'], ['Battery', 'Charger'], ['Wifi', 'Bluetooth'],
       ['Drone', 'Helicopter'], ['Speaker', 'Microphone'], ['Mouse', 'Trackpad'],
+      ['Monitor', 'Projector'], ['Printer', 'Scanner'], ['Radio', 'Podcast'],
+      ['Console', 'Arcade'], ['Satellite', 'Telescope'], ['Router', 'Modem'],
+      ['Server', 'Database'], ['Joystick', 'Controller'],
     ],
   },
   {
@@ -78,6 +102,9 @@ export const CATEGORIES = [
       ['Pilot', 'Sailor'], ['Police', 'Soldier'], ['Actor', 'Model'],
       ['Lawyer', 'Judge'], ['Farmer', 'Gardener'], ['Barber', 'Hairdresser'],
       ['Waiter', 'Bartender'], ['Priest', 'Monk'], ['Detective', 'Spy'],
+      ['Firefighter', 'Lifeguard'], ['Painter', 'Plumber'], ['Carpenter', 'Blacksmith'],
+      ['Scientist', 'Engineer'], ['Journalist', 'Author'], ['Dentist', 'Surgeon'],
+      ['Athlete', 'Coach'], ['Tailor', 'Cobbler'],
     ],
   },
   {
@@ -86,6 +113,9 @@ export const CATEGORIES = [
       ['Eye', 'Ear'], ['Nose', 'Mouth'], ['Hair', 'Beard'],
       ['Bone', 'Muscle'], ['Blood', 'Sweat'], ['Tooth', 'Nail'],
       ['Brain', 'Skull'], ['Knee', 'Elbow'], ['Pill', 'Syrup'],
+      ['Wrist', 'Ankle'], ['Lip', 'Cheek'], ['Liver', 'Kidney'],
+      ['Palm', 'Sole'], ['Shoulder', 'Hip'], ['Vein', 'Artery'],
+      ['Bandage', 'Plaster'], ['Chin', 'Jaw'],
     ],
   },
 ];
