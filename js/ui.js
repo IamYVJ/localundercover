@@ -64,6 +64,9 @@ export function render(root, app, intents) {
 // ---------------------------------------------------------------------------
 function homeScreen(app, intents) {
   const wrap = el('div', { class: 'field-group' });
+  // Arrived via an invite link (?code=…): surface a prominent one-tap join and
+  // demote the usual "Create game" / manual-join controls.
+  const invited = app.invited && !!app.codeInput;
 
   wrap.appendChild(el('div', { class: 'wordmark' },
     el('span', { class: 'wordmark-dot' }), 'LOCAL · SAME WI-FI · 4–20 PLAYERS'));
@@ -79,8 +82,23 @@ function homeScreen(app, intents) {
   wrap.appendChild(el('div', { class: 'card' },
     el('div', { class: 'card-label' }, 'Your name'), nameField));
 
+  // Invite landing: a highlighted, pre-filled join for the room in the link.
+  if (invited) {
+    wrap.appendChild(el('div', { class: 'card', style: 'border-color:var(--accent)' },
+      el('div', { class: 'card-label accent' }, "You're invited"),
+      el('div', { class: 'room-code' }, app.codeInput),
+      el('button', {
+        class: 'btn btn-primary btn-block', onclick: () => intents.join(),
+      }, 'Join game')));
+    // Escape hatch: drop the pre-filled code and reveal manual entry.
+    wrap.appendChild(el('button', {
+      class: 'link-btn', onclick: () => intents.clearInvite(),
+    }, 'Join a different game'));
+  }
+
   wrap.appendChild(el('button', {
-    class: 'btn btn-primary btn-block', onclick: () => intents.host(),
+    class: 'btn btn-block ' + (invited ? 'btn-secondary' : 'btn-primary'),
+    onclick: () => intents.host(),
   }, 'Create game'));
 
   // Server reachability, mirroring the in-room transport badge. Shown only when a
@@ -113,15 +131,18 @@ function homeScreen(app, intents) {
       'Create game = same Wi-Fi, works offline. Host on server = friends can join from anywhere.'));
   }
 
-  const codeField = el('input', {
-    class: 'field field-code', type: 'text', maxlength: 4, placeholder: 'CODE',
-    value: app.codeInput || '', autocomplete: 'off', autocapitalize: 'characters',
-    oninput: (e) => intents.setCode(e.target.value),
-  });
-  wrap.appendChild(el('div', { class: 'card' },
-    el('div', { class: 'card-label' }, 'Join a game'),
-    codeField,
-    el('button', { class: 'btn btn-secondary btn-block', onclick: () => intents.join() }, 'Join')));
+  // Manual code entry — redundant once an invite link has pre-filled the room.
+  if (!invited) {
+    const codeField = el('input', {
+      class: 'field field-code', type: 'text', maxlength: 4, placeholder: 'CODE',
+      value: app.codeInput || '', autocomplete: 'off', autocapitalize: 'characters',
+      oninput: (e) => intents.setCode(e.target.value),
+    });
+    wrap.appendChild(el('div', { class: 'card' },
+      el('div', { class: 'card-label' }, 'Join a game'),
+      codeField,
+      el('button', { class: 'btn btn-secondary btn-block', onclick: () => intents.join() }, 'Join')));
+  }
 
   if (app.error) wrap.appendChild(el('p', { class: 'error-text' }, app.error));
 

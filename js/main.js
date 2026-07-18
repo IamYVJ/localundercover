@@ -51,6 +51,7 @@ const app = {
   toast: '',
   nameInput: loadName(),
   codeInput: loadCode(),
+  invited: false,        // arrived via an invite link (?code=…): show a 1-tap join
   showRules: false,
 };
 
@@ -350,9 +351,21 @@ function handleClientError(err) {
     draw();
     return;
   }
-  app.error = describePeerError(err);
+  app.error = joinFailureMessage(err);
   app.screen = app.pub ? 'hostleft' : 'error';
   draw();
+}
+
+// "No peer with that code" is misleading when a server is configured but was
+// unreachable: the code may belong to a server-hosted room we never got to try
+// (we routed to peer-to-peer only because the health probe was failing). Point
+// the user at the real cause and a retry rather than "check the code".
+function joinFailureMessage(err) {
+  if (err && err.type === 'peer-unavailable' && serverConfigured() && !app.serverAvailable) {
+    return "No game found with that code. If it's hosted on the server, we couldn't "
+      + 'reach the server just now — check your connection and try again.';
+  }
+  return describePeerError(err);
 }
 
 // ---------------------------------------------------------------------------
@@ -539,6 +552,7 @@ function resetToHome() {
   app.netGaveUp = false;
   app.netNextRetryAt = 0;
   app.error = '';
+  app.invited = false;        // clear the invite-landing state on a manual reset
   draw();
 }
 
@@ -642,6 +656,9 @@ const intents = {
   host: doHost,
   hostServer: doHostServer,
   join: doJoin,
+  // Leave the invite-landing state so the manual "Join a game" card returns,
+  // letting an invited user enter a different room code instead.
+  clearInvite: () => { app.invited = false; app.codeInput = ''; draw(); },
   goHome,
   leave,
   retryNow: () => {
@@ -750,7 +767,7 @@ function resumeOrHome() {
     return;
   }
   const linkCode = readCodeFromUrl();
-  if (linkCode) app.codeInput = linkCode;
+  if (linkCode) { app.codeInput = linkCode; app.invited = true; }
   draw();
 }
 
