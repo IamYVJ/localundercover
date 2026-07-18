@@ -83,13 +83,53 @@ function reconnectDelay(tries) {
 // ---------------------------------------------------------------------------
 // Render
 // ---------------------------------------------------------------------------
-function draw() { render(root, app, intents); }
+function draw() {
+  render(root, app, intents);
+  syncWakeLock(); // reconcile the screen wake lock with the current phase
+}
 
 function showToast(msg) {
   app.toast = msg;
   draw();
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { app.toast = ''; draw(); }, 2600);
+}
+
+// ---------------------------------------------------------------------------
+// Screen wake lock
+// ---------------------------------------------------------------------------
+// Keep the phone awake during an active round so the screen doesn't sleep
+// between taps (e.g. while waiting out another player's describe turn or a
+// vote). Best-effort by design: the API is missing on some browsers and in
+// insecure contexts, the request can reject, and the browser auto-releases the
+// lock whenever the tab is hidden — so we reconcile on every render and on
+// visibility changes, and never let a failure surface to the caller.
+let wakeLock = null;
+
+function wantWakeLock() {
+  return app.screen === 'room'
+    && !!app.pub
+    && app.pub.phase !== PHASES.LOBBY
+    && app.pub.phase !== PHASES.GAMEOVER;
+}
+
+async function syncWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  const want = wantWakeLock() && document.visibilityState === 'visible';
+  try {
+    if (want && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      // The browser may drop the lock on its own (backgrounding, low power);
+      // forget our handle so the next sync re-acquires when appropriate.
+      wakeLock.addEventListener('release', () => { wakeLock = null; }, { once: true });
+    } else if (!want && wakeLock) {
+      const wl = wakeLock;
+      wakeLock = null;
+      await wl.release();
+    }
+  } catch (_) {
+    wakeLock = null; // request/release can reject (not visible, low battery, …).
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -802,6 +842,9 @@ async function boot() {
   initTabChannel();
   const held = await acquireTabLock();
   if (!held) { app.screen = 'duplicate'; draw(); return; }
+  // Re-acquire the wake lock when we return to a hidden tab (the browser drops
+  // it on hide); syncWakeLock itself decides whether the current phase wants one.
+  document.addEventListener('visibilitychange', syncWakeLock);
   resumeOrHome();
   checkServerHealth();
 }
