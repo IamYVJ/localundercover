@@ -15,6 +15,7 @@
   --accent:      #F4B942;
   --accent-hi:   #ffcd63;
   --accent-dim:  rgba(244, 185, 66, 0.12);
+  --focus:       #ffcd63;   /* keyboard focus ring — bright gold, offset for contrast */
 
   --text:        #ECEAF3;
   --muted:       #9b98a8;
@@ -176,6 +177,22 @@ body {
   cursor: pointer; padding: 6px; text-decoration: underline; text-underline-offset: 3px;
 }
 .link-btn:hover { color: var(--accent); }
+
+/* --- Focus ring (keyboard accessibility) -------------------------------- */
+/* Shown only for keyboard / programmatic focus, never a mouse click. The
+   element-name selectors out-rank the `outline: none` on .field and .slider by
+   specificity, so the ring wins regardless of source order. The 2px offset
+   leaves a dark gap even on the gold primary button, keeping the ring visible
+   against any surface. Mouse focus keeps the existing quiet border-only style. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
 
 /* --- Cards --------------------------------------------------------------- */
 .card {
