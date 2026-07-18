@@ -3,7 +3,7 @@
 import {
   MIN_PLAYERS, MAX_PLAYERS, ROLES, TIE_BREAK, TIMER,
   defaultRoleConfig, validateRoleConfig, maxUndercover, buildRoleDeck, shuffle,
-  assignWordPair, wordForRole, checkWinner, chooseStarter, wordsMatch, clampTimerSeconds,
+  pickWordPair, assignWordPair, wordForRole, checkWinner, chooseStarter, wordsMatch, clampTimerSeconds,
 } from '../js/rules.js';
 import { GameEngine, PHASES } from '../js/state.js';
 import { MIXED } from '../js/words.js';
@@ -73,6 +73,36 @@ ok(!validateRoleConfig({ undercover: 1, mrwhite: 0 }, 3).ok, '3 players rejected
   const w = assignWordPair(['Coffee', 'Tea'], rng(1));
   ok([w.civilianWord, w.undercoverWord].sort().join('|') === 'Coffee|Tea', 'both words assigned');
   ok(w.civilianWord !== w.undercoverWord, 'sides get different words');
+}
+
+// Play-again anti-repeat: pickWordPair avoids an excluded pair, and the engine
+// carries the last dealt pair into the next round so it can't repeat immediately.
+{
+  const samePair = (a, b) => [a[0], a[1]].sort().join('|') === [b[0], b[1]].sort().join('|');
+
+  // MIXED spans the whole bank (many pairs), so an excluded pair must never come
+  // back — checked across many rng states, since the guarantee is the filter,
+  // not luck.
+  const first = pickWordPair(MIXED, rng(1));
+  let repeats = 0;
+  for (let s = 0; s < 300; s++) {
+    if (samePair(pickWordPair(MIXED, rng(s), first), first)) repeats++;
+  }
+  eq(repeats, 0, 'pickWordPair: an excluded pair is never dealt again from a multi-pair bank');
+
+  // An exclude that isn't in the pool is harmless — a real pair still comes back.
+  const outOfPool = pickWordPair(MIXED, rng(7), ['__nope__', '__nada__']);
+  ok(Array.isArray(outOfPool) && outOfPool.length === 2, 'pickWordPair: an out-of-pool exclusion still yields a pair');
+
+  // Engine wiring: startGame excludes the remembered pair and records the new one.
+  const known = pickWordPair(MIXED, rng(2));
+  const g = new GameEngine({ rng: rng(2) });
+  for (let i = 0; i < 4; i++) g.addPlayer({ id: 'p'+i, name: 'P'+i, clientId: 'c'+i, isHost: i === 0 });
+  g._lastPair = known; // simulate the previous round having dealt this pair
+  g.startGame(g.hostId);
+  const dealt = [g.words.civilianWord, g.words.undercoverWord];
+  ok(!samePair(dealt, known), 'startGame: a new round avoids repeating the previous pair');
+  ok(g._lastPair && samePair(g._lastPair, dealt), 'startGame: the freshly dealt pair is remembered');
 }
 
 // wordForRole mapping (Mr. White gets nothing).

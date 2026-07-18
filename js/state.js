@@ -37,6 +37,7 @@ export class GameEngine {
       timer: false, timerSeconds: TIMER.DEFAULT,
     };
     this.words = null; // { civilianWord, undercoverWord } (secret)
+    this._lastPair = null; // last dealt [wordA, wordB], so Play again won't repeat it
     this.round = 0;
     this.speaking = null; // { order:[id], idx }
     this.vote = null;     // { round:'main'|'runoff', candidates:[id], ballots:{voter:target}, runoffCount, tally }
@@ -239,8 +240,9 @@ export class GameEngine {
     }
 
     const deck = shuffle(buildRoleDeck(n, this.config), this._rng);
-    const pair = pickWordPair(this.config.category, this._rng);
+    const pair = pickWordPair(this.config.category, this._rng, this._lastPair);
     this.words = assignWordPair(pair, this._rng);
+    this._lastPair = pair; // remembered across Play again so the next round differs
 
     this.players.forEach((p, i) => {
       p.roleId = deck[i];
@@ -608,7 +610,7 @@ export class GameEngine {
   serialize() {
     return JSON.stringify({
       phase: this.phase, hostId: this.hostId, players: this.players, config: this.config,
-      words: this.words, round: this.round, speaking: this.speaking, vote: this.vote,
+      words: this.words, _lastPair: this._lastPair, round: this.round, speaking: this.speaking, vote: this.vote,
       reveal: this.reveal, whiteGuess: this.whiteGuess, winner: this.winner, result: this.result,
       log: this.log, history: this.history,
     });
