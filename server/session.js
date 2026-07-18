@@ -166,6 +166,13 @@ function onJoin(rooms, ws, msg) {
 
   s.code = code; s.playerId = playerId; s.clientId = clientId;
   s.owner = room.isOwnerClient(clientId);
+  // The owner made it back: call off any pending handoff and re-anchor the
+  // engine's host to this live seat (a lobby drop removes the old seat, leaving
+  // hostId dangling — without this the returning owner couldn't start).
+  if (s.owner) {
+    room.cancelOwnerGrace();
+    if (room.engine.hostId !== playerId) room.engine.transferHost(playerId);
+  }
 
   safeSend(ws, { type: 'welcome', playerId, code, owner: s.owner });
   room.touch();
@@ -236,6 +243,9 @@ export function handleClose(rooms, ws) {
   if (!room) return;
   room.detach(s.playerId, ws);
   try { room.engine.markOffline(s.playerId); } catch (_) {}
+  // If the OWNER just dropped, start the handoff clock: reconnect in time and
+  // they keep the room; otherwise the next-longest-seated player inherits it.
+  if (s.owner) room.beginOwnerHandoff();
   room.touch();
   room.broadcast();
 }

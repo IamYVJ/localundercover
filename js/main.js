@@ -333,6 +333,10 @@ function handleClientMessage(msg) {
       app.error = 'The host removed you from the game.';
       draw();
       break;
+    case 'notice':
+      // A transient, non-fatal heads-up from the server (e.g. promoted to host).
+      if (msg.message) showToast(msg.message);
+      break;
     case 'error':
       app.error = msg.message || 'The game ended.';
       app.screen = app.pub ? 'hostleft' : 'error';

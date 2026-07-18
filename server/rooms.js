@@ -45,6 +45,7 @@ class Room {
     this.members = new Map();           // playerId -> ws (currently connected)
     this.lastActivity = Date.now();
     this.turnTimer = null;
+    this.ownerGraceTimer = null;        // pending owner-handoff after an owner drop
   }
 
   touch() { this.lastActivity = Date.now(); }
@@ -120,6 +121,41 @@ class Room {
 
   stopTimers() {
     if (this.turnTimer) { clearTimeout(this.turnTimer); this.turnTimer = null; }
+    this.cancelOwnerGrace();
+  }
+
+  // --- owner handoff -------------------------------------------------------
+  // The owner's socket dropped. Give them a grace window to reconnect; if it
+  // lapses while other players are still here, promote the next in line. With
+  // nobody left, do nothing — the empty room is GC'd on its own.
+  beginOwnerHandoff() {
+    this.cancelOwnerGrace();
+    if (this.members.size === 0) return;
+    this.ownerGraceTimer = setTimeout(() => {
+      this.ownerGraceTimer = null;
+      this.promoteNewOwner();
+    }, this.mgr.ownerGraceMs);
+    if (this.ownerGraceTimer.unref) this.ownerGraceTimer.unref();
+  }
+
+  cancelOwnerGrace() {
+    if (this.ownerGraceTimer) { clearTimeout(this.ownerGraceTimer); this.ownerGraceTimer = null; }
+  }
+
+  // Hand the room to the longest-seated player who still has a live socket
+  // (engine order == join order). Moves both the server-level owner id and the
+  // engine's host, flags the heir's session so `endGame` works, then refreshes.
+  promoteNewOwner() {
+    const heir = this.engine.players.find((p) => this.members.has(p.id));
+    if (!heir) return; // everyone left during grace; GC will reap the room
+    this.engine.transferHost(heir.id);
+    this.ownerClientId = heir.clientId || null;
+    const ws = this.members.get(heir.id);
+    if (ws && ws.session) ws.session.owner = true;
+    this.touch();
+    this.broadcast();
+    // Host controls appear silently otherwise — tell the heir they're in charge.
+    if (ws) this.send(ws, { type: 'notice', message: "You're now the host." });
   }
 
   // A room is collectable once nobody is connected and it's been idle a while,
@@ -136,6 +172,7 @@ export class RoomManager {
     this.send = opts.send || (() => {});
     this.maxRooms = opts.maxRooms || 200;
     this.roomTtlMs = opts.roomTtlMs || 6 * 60 * 60 * 1000; // 6h, matches client session TTL
+    this.ownerGraceMs = opts.ownerGraceMs || 30 * 1000;    // owner reconnect window before handoff
     this.newEngine = opts.newEngine || (() => new GameEngine());
     this.rooms = new Map(); // code -> Room
     this._gc = null;

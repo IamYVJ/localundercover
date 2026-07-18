@@ -597,6 +597,34 @@ function firstCivAlive(g) { return g.alivePlayers().find((p) => p.roleId === ROL
 }
 
 // ===========================================================================
+// TRANSFER HOST (server-mode owner handoff; the P2P path never calls this)
+// ===========================================================================
+
+// Handing the host role to another seat moves hostId and both per-player
+// isHost flags, and is reflected in each player's private state.
+{
+  const g = new GameEngine({ rng: rng(11) });
+  for (let i = 0; i < 4; i++) g.addPlayer({ id: 'p'+i, name: 'P'+i, clientId: 'c'+i, isHost: i === 0 });
+  eq(g.hostId, 'p0', 'transferHost: p0 starts as host');
+
+  const res = g.transferHost('p2');
+  ok(res.ok, 'transferHost: handing off to a seated player succeeds');
+  eq(g.hostId, 'p2', 'transferHost: hostId moves to the new host');
+  ok(g.isHost('p2'), 'transferHost: isHost() true for the new host');
+  ok(!g.isHost('p0'), 'transferHost: isHost() false for the old host');
+  eq(g.getPlayer('p2').isHost, true, 'transferHost: new host per-player flag set');
+  eq(g.getPlayer('p0').isHost, false, 'transferHost: old host per-player flag cleared');
+  eq(g.privateStateFor('p2').isHost, true, 'transferHost: new host sees isHost in private state');
+  eq(g.privateStateFor('p0').isHost, false, 'transferHost: old host no longer sees isHost');
+
+  // A bad target is refused and must not disturb the sitting host.
+  const bad = g.transferHost('nobody');
+  ok(!bad.ok, 'transferHost: an unknown target is refused');
+  eq(g.hostId, 'p2', 'transferHost: hostId unchanged after a refused handoff');
+  eq(g.getPlayer('p2').isHost, true, 'transferHost: sitting host keeps the flag after a refused handoff');
+}
+
+// ===========================================================================
 // KICK / REMOVE PLAYER (host moderation, lobby + mid-game)
 // ===========================================================================
 

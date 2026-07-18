@@ -51,6 +51,19 @@ export class GameEngine {
   // ---- helpers ------------------------------------------------------------
   getPlayer(id) { return this.players.find((p) => p.id === id) || null; }
   isHost(id) { return id === this.hostId; }
+
+  // Move host to another seated player. Used server-side to hand a room off when
+  // the owner drops for good, or to re-anchor the host onto a returning owner
+  // whose lobby seat was dropped. No-op-safe if `newId` isn't seated.
+  transferHost(newId) {
+    const next = this.getPlayer(newId);
+    if (!next) return { ok: false, error: 'No such player to make host.' };
+    const prev = this.getPlayer(this.hostId);
+    if (prev) prev.isHost = false;
+    this.hostId = newId;
+    next.isHost = true;
+    return { ok: true };
+  }
   alivePlayers() { return this.players.filter((p) => p.alive); }
   _log(text) { this.log.push({ round: this.round, text }); if (this.log.length > LOG_CAP) this.log.shift(); }
 

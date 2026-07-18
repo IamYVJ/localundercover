@@ -361,6 +361,97 @@ function makeLobby(rooms, n) {
 }
 
 // ===========================================================================
+// OWNER HANDOFF — when the owner drops for good, the next-longest-seated
+// connected player inherits the room; a timely reconnect keeps it instead.
+// ===========================================================================
+
+// Mid-game: owner drops, grace window lapses -> heir (p1) inherits engine host
+// AND the server owner id, and can wield owner-only controls a bystander can't.
+{
+  const rooms = makeRooms(7, { ownerGraceMs: 10000 });
+  const room = makeLobby(rooms, 4);
+  const r = rooms.get(room.code);
+  const eng = r.engine;
+  send(rooms, room.owner, { type: 'config', undercover: 1, mrwhite: false, category: MIXED });
+  send(rooms, room.owner, { type: 'start' });
+  for (const id of room.ids) send(rooms, room.sockets[id], { type: 'ready' });
+  ok(eng.phase !== PHASES.LOBBY, 'handoff: game is mid-flight');
+  eq(eng.hostId, 'owner', 'handoff: owner hosts to begin with');
+
+  close(rooms, room.owner);
+  ok(r.ownerGraceTimer, 'handoff: owner drop arms the grace timer');
+  eq(r.ownerClientId, 'c-owner', 'handoff: ownership stays put during grace');
+
+  r.promoteNewOwner(); // simulate the grace window lapsing
+  eq(eng.hostId, 'p1', 'handoff: engine host moves to the heir');
+  ok(eng.isHost('p1') && !eng.isHost('owner'), 'handoff: old owner is no longer host');
+  eq(r.ownerClientId, 'c1', 'handoff: server owner id moves to the heir');
+  ok(room.sockets['p1'].session.owner === true, 'handoff: heir session flagged owner');
+  ok(room.sockets['p1'].lastOfType('state').priv.isHost === true, 'handoff: heir sees itself as host');
+  ok(room.sockets['p1'].hasType('notice'), 'handoff: the heir is told it is now the host');
+  ok(!room.sockets['p2'].hasType('notice'), 'handoff: bystanders are not told they are host');
+
+  send(rooms, room.sockets['p2'], { type: 'endGame' });
+  ok(rooms.get(room.code), 'handoff: a non-heir still cannot end the game');
+  send(rooms, room.sockets['p1'], { type: 'endGame' });
+  ok(rooms.get(room.code) === null, 'handoff: the heir can end the game');
+}
+
+// Mid-game: owner reconnects inside the grace window -> keeps the room, and the
+// pending handoff is cancelled.
+{
+  const rooms = makeRooms(7, { ownerGraceMs: 10000 });
+  const room = makeLobby(rooms, 4);
+  const r = rooms.get(room.code);
+  send(rooms, room.owner, { type: 'config', undercover: 1, mrwhite: false, category: MIXED });
+  send(rooms, room.owner, { type: 'start' });
+  for (const id of room.ids) send(rooms, room.sockets[id], { type: 'ready' });
+
+  close(rooms, room.owner);
+  ok(r.ownerGraceTimer, 'reconnect: grace armed on owner drop');
+  const back = connect('owner-b');
+  send(rooms, back, { type: 'join', code: room.code, name: 'Alice', clientId: 'c-owner' });
+  ok(back.lastOfType('welcome').owner === true, 'reconnect: returning owner re-welcomed as owner');
+  ok(r.ownerGraceTimer === null, 'reconnect: grace timer cancelled on owner return');
+  eq(r.engine.hostId, 'owner-b', 'reconnect: engine host follows the owner to its new socket');
+  eq(r.ownerClientId, 'c-owner', 'reconnect: ownership unchanged');
+}
+
+// Lobby: a dropped owner seat is removed (leaving hostId dangling) — a reconnect
+// must re-anchor the host so the returning owner can actually start.
+{
+  const rooms = makeRooms(1, { ownerGraceMs: 10000 });
+  const room = makeLobby(rooms, 4);
+  const r = rooms.get(room.code);
+  eq(r.engine.hostId, 'owner', 'lobby re-anchor: owner starts as host');
+
+  close(rooms, room.owner);
+  ok(r.ownerGraceTimer, 'lobby re-anchor: grace armed');
+  ok(!r.engine.getPlayer('owner'), 'lobby re-anchor: dropped lobby owner seat is removed');
+
+  const back = connect('owner-b');
+  send(rooms, back, { type: 'join', code: room.code, name: 'Alice', clientId: 'c-owner' });
+  ok(back.lastOfType('welcome').owner === true, 'lobby re-anchor: returning owner is owner again');
+  eq(r.engine.hostId, 'owner-b', 'lobby re-anchor: host re-pointed at the live owner seat');
+  ok(r.ownerGraceTimer === null, 'lobby re-anchor: grace cancelled');
+
+  send(rooms, back, { type: 'config', undercover: 1, mrwhite: false, category: MIXED });
+  back.clear();
+  send(rooms, back, { type: 'start' });
+  ok(r.engine.phase !== PHASES.LOBBY, 'lobby re-anchor: the returning owner can start the game');
+}
+
+// Solo owner drop: nobody is left to inherit, so no handoff is armed.
+{
+  const rooms = makeRooms(1, { ownerGraceMs: 10000 });
+  const owner = connect('owner');
+  send(rooms, owner, { type: 'createRoom', name: 'Alice', clientId: 'c-owner' });
+  const r = rooms.get(owner.lastOfType('welcome').code);
+  close(rooms, owner);
+  ok(r.ownerGraceTimer === null, 'handoff: solo owner drop arms nothing to hand off to');
+}
+
+// ===========================================================================
 // ROBUSTNESS — malformed input and out-of-order intents never crash.
 // ===========================================================================
 {
