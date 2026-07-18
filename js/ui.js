@@ -468,18 +468,29 @@ function holdCard(priv) {
   const card = el('div', {
     class: 'hold-card',
     tabindex: '0',
+    role: 'button',
+    'aria-label': 'Hold to reveal your secret role and word — or press Enter to toggle.',
   }, el('div', { class: 'hold-hint' }, 'HOLD TO REVEAL'));
 
   const reveal = el('div', { class: 'hold-reveal' });
   if (priv && priv.role) reveal.appendChild(revealContent(priv));
   card.appendChild(reveal);
 
-  const show = (e) => { e.preventDefault(); card.classList.add('revealed'); };
+  const show = (e) => { if (e) e.preventDefault(); card.classList.add('revealed'); };
   const hide = () => card.classList.remove('revealed');
   card.addEventListener('pointerdown', show);
   card.addEventListener('pointerup', hide);
   card.addEventListener('pointerleave', hide);
   card.addEventListener('pointercancel', hide);
+  // Keyboard/switch users can't reliably hold a press: Enter/Space toggles the
+  // reveal, and blur re-hides it so the word never lingers once focus moves on.
+  card.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      card.classList.toggle('revealed');
+    }
+  });
+  card.addEventListener('blur', hide);
   return card;
 }
 
@@ -874,16 +885,28 @@ function peekOverlay(app) {
   const overlay = el('div', { class: 'peek-overlay' }, revealContent(priv),
     el('div', { class: 'peek-hint' }, 'Release to hide'));
   const bar = el('div', { class: 'peek-bar' },
-    el('button', { class: 'peek-btn' }, 'Hold to view your word'),
+    el('button', {
+      class: 'peek-btn',
+      'aria-label': 'Hold to view your word — or press Enter to toggle.',
+    }, 'Hold to view your word'),
     el('span', { class: 'peek-code' }, 'ROOM ' + app.code));
 
   const btn = bar.firstChild;
-  const show = (e) => { e.preventDefault(); overlay.classList.add('show'); };
+  const show = (e) => { if (e) e.preventDefault(); overlay.classList.add('show'); };
   const hide = () => overlay.classList.remove('show');
   btn.addEventListener('pointerdown', show);
   btn.addEventListener('pointerup', hide);
   btn.addEventListener('pointerleave', hide);
   btn.addEventListener('pointercancel', hide);
+  // Same keyboard/switch path as the reveal card: Enter/Space toggles the
+  // overlay (a plain hold isn't operable), blur hides it again.
+  btn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      overlay.classList.toggle('show');
+    }
+  });
+  btn.addEventListener('blur', hide);
 
   return el('div', {}, overlay, bar);
 }
