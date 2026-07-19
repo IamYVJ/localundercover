@@ -8,7 +8,7 @@
 
 import { el, clear } from './util.js';
 import {
-  PHASES, TIE_BREAK, TIMER, MIN_PLAYERS, MAX_PLAYERS, maxUndercover, describeRole,
+  PHASES, ROLES, TIE_BREAK, TIMER, MIN_PLAYERS, MAX_PLAYERS, maxUndercover, describeRole,
 } from './rules.js';
 import { categoryOptions } from './words.js';
 import { serverConfigured } from './config.js';
@@ -873,18 +873,34 @@ function gameoverScreen(app, intents) {
         el('div', { class: 'card-label' }, 'Undercover'),
         el('div', { class: 'secret-word uc', style: 'font-size:24px' }, f.words ? f.words.undercoverWord : '—')))));
 
-  if (f.history && f.history.length) wrap.appendChild(recapCard(f.history));
+  if (f.history && f.history.length) {
+    const stats = recapStats(f);
+    const statBits = [`${stats.rounds} ${stats.rounds === 1 ? 'round' : 'rounds'}`,
+      `${stats.impostorsCaught}/${stats.impostorsTotal} impostors caught`];
+    if (stats.mostVoted) statBits.push(`Most voted: ${stats.mostVoted.name}`);
+    wrap.appendChild(el('p', { class: 'fine', style: 'text-align:center;margin-top:-4px' }, statBits.join('  ·  ')));
+    wrap.appendChild(recapCard(f.history));
+  }
 
   const list = el('ul', { class: 'player-list' });
   (f.players || []).forEach((p) => {
     const role = describeRole(p.role);
+    const out = eliminationRound(f.history, p.name);
     list.appendChild(el('li', { class: 'player-row' + (p.alive ? '' : ' eliminated') },
       el('span', { class: 'pname' }, p.name),
+      el('span', { class: 'fine' }, out ? `out R${out}` : 'survived'),
       p.word ? el('span', { class: 'fine' }, p.word) : (p.role === 'mrwhite' ? el('span', { class: 'fine' }, 'no word') : null),
       el('span', { class: 'pill ' + role.color }, role.name)));
   });
   wrap.appendChild(el('div', { class: 'card' },
     el('div', { class: 'card-label' }, 'Everyone’s role'), list));
+
+  // Copy/share a plain-text recap — handy for pasting into the group chat.
+  const canShare = typeof navigator !== 'undefined' && !!navigator.share;
+  wrap.appendChild(el('button', {
+    class: 'btn btn-ghost btn-block',
+    onclick: (e) => shareRecap(recapText(f), e.currentTarget),
+  }, canShare ? 'Share recap' : 'Copy recap'));
 
   if (isHost(app)) {
     wrap.appendChild(el('button', { class: 'btn btn-primary btn-block', onclick: () => intents.playAgain() }, 'Play again'));
@@ -929,6 +945,99 @@ function recapCard(history) {
   });
   return el('div', { class: 'card' },
     el('div', { class: 'card-label' }, 'Round by round'), ...rounds);
+}
+
+// --- Game-over recap extras (pure; exported for unit tests) ----------------
+
+// The round a player was voted out in (matched by name in the recap history),
+// or null if they were still standing when the game ended.
+export function eliminationRound(history, name) {
+  const h = (history || []).find((r) => r.eliminated && r.eliminated.name === name);
+  return h ? h.round : null;
+}
+
+// End-of-game tallies for the stats strip: how long it ran, how many impostors
+// were caught, and who drew the most votes across the whole game.
+export function recapStats(final) {
+  const f = final || {};
+  const history = f.history || [];
+  const players = f.players || [];
+  const impostors = players.filter((p) => p.role === ROLES.UNDERCOVER || p.role === ROLES.MRWHITE);
+
+  // Total votes each name drew across every round → the game's biggest target.
+  const votes = new Map();
+  history.forEach((r) => (r.tally || []).forEach((t) => {
+    if (t.votes > 0) votes.set(t.name, (votes.get(t.name) || 0) + t.votes);
+  }));
+  let mostVoted = null;
+  votes.forEach((v, name) => { if (!mostVoted || v > mostVoted.votes) mostVoted = { name, votes: v }; });
+
+  return {
+    rounds: history.length,
+    impostorsCaught: impostors.filter((p) => !p.alive).length,
+    impostorsTotal: impostors.length,
+    mostVoted,
+  };
+}
+
+// A shareable plain-text summary of the finished game (for a group chat).
+export function recapText(final) {
+  const f = final || {};
+  const title = f.winner === 'civilians' ? 'Civilians win'
+    : f.winner === 'mrwhite' ? 'Mr. White wins'
+    : 'Impostors win';
+  const lines = [`Undercover — ${title}`];
+  if (f.words) {
+    lines.push(`Words: ${f.words.civilianWord} (civilians) vs ${f.words.undercoverWord} (undercover)`);
+  }
+  const roster = (f.players || []).map((p) => {
+    const out = eliminationRound(f.history, p.name);
+    return `• ${p.name} — ${describeRole(p.role).name} (${out ? 'out R' + out : 'survived'})`;
+  });
+  if (roster.length) lines.push('', 'Roles:', ...roster);
+
+  const s = recapStats(f);
+  const bits = [`${s.rounds} ${s.rounds === 1 ? 'round' : 'rounds'}`,
+    `${s.impostorsCaught}/${s.impostorsTotal} impostors caught`];
+  if (s.mostVoted) bits.push(`most voted: ${s.mostVoted.name}`);
+  lines.push('', bits.join(' · '));
+  return lines.join('\n');
+}
+
+// Copy/share the recap. Prefers the native share sheet (mobile), then the
+// clipboard, then a legacy <textarea> copy. Flips the button label as feedback;
+// a subsequent re-render may reset it, which is harmless. Browser-only APIs are
+// touched only here, inside the click handler, so ui.js stays Node-importable.
+async function shareRecap(text, btn) {
+  const flip = (label) => {
+    if (!btn) return;
+    const original = btn.textContent;
+    btn.textContent = label;
+    setTimeout(() => { btn.textContent = original; }, 1600);
+  };
+  if (navigator.share) {
+    try { await navigator.share({ text }); return; }
+    catch (_) { return; } // sheet dismissed — don't fall through to a silent copy
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    flip('Copied!');
+    return;
+  } catch (_) { /* fall through to the legacy path */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'absolute';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    flip('Copied!');
+  } catch (_) {
+    flip('Copy failed');
+  }
 }
 
 // ---------------------------------------------------------------------------

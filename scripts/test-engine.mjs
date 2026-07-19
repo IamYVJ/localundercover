@@ -8,7 +8,7 @@ import {
 } from '../js/rules.js';
 import { GameEngine, PHASES } from '../js/state.js';
 import { MIXED } from '../js/words.js';
-import { announcementFor } from '../js/ui.js';
+import { announcementFor, eliminationRound, recapStats, recapText } from '../js/ui.js';
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.error('  ✗ ' + msg); } }
@@ -856,6 +856,52 @@ function firstCivAlive(g) { return g.alivePlayers().find((p) => p.roleId === ROL
      'announce: Mr. White wins');
   ok(/impostors win/i.test(A('room', { phase: PHASES.GAMEOVER, players, final: { winner: 'undercover' } }, null)),
      'announce: the undercover side wins');
+}
+
+// GAME-OVER RECAP HELPERS — pure derivations behind the end screen extras
+{
+  const final = {
+    winner: 'civilians',
+    reason: 'All impostors are out.',
+    words: { civilianWord: 'Coffee', undercoverWord: 'Tea' },
+    history: [
+      { round: 1, eliminated: { name: 'Bo', role: ROLES.CIVILIAN }, tally: [{ name: 'Bo', votes: 3 }, { name: 'Ana', votes: 1 }], ballots: [], random: false },
+      { round: 2, eliminated: { name: 'Cy', role: ROLES.UNDERCOVER }, tally: [{ name: 'Cy', votes: 2 }, { name: 'Ana', votes: 1 }], ballots: [], random: false },
+    ],
+    players: [
+      { id: 'p0', name: 'Ana', role: ROLES.CIVILIAN, word: 'Coffee', alive: true },
+      { id: 'p1', name: 'Bo', role: ROLES.CIVILIAN, word: 'Coffee', alive: false },
+      { id: 'p2', name: 'Cy', role: ROLES.UNDERCOVER, word: 'Tea', alive: false },
+      { id: 'p3', name: 'Dee', role: ROLES.MRWHITE, word: null, alive: true },
+    ],
+  };
+
+  // eliminationRound: matched by name; null when the player was never voted out.
+  eq(eliminationRound(final.history, 'Bo'), 1, 'recap: Bo left in round 1');
+  eq(eliminationRound(final.history, 'Cy'), 2, 'recap: Cy left in round 2');
+  eq(eliminationRound(final.history, 'Ana'), null, 'recap: a survivor has no elimination round');
+  eq(eliminationRound(final.history, 'Nobody'), null, 'recap: an unknown name is treated as a survivor');
+  eq(eliminationRound(undefined, 'Ana'), null, 'recap: missing history never throws');
+
+  // recapStats: rounds, impostors caught vs total, and the biggest vote target.
+  const s = recapStats(final);
+  eq(s.rounds, 2, 'stats: two rounds were played');
+  eq(s.impostorsTotal, 2, 'stats: two impostors total (undercover + Mr. White)');
+  eq(s.impostorsCaught, 1, 'stats: one impostor was eliminated (Dee survived)');
+  eq(s.mostVoted.name, 'Bo', 'stats: Bo drew the most votes across the game');
+  eq(s.mostVoted.votes, 3, 'stats: Bo drew 3 votes total');
+  eq(recapStats({}).mostVoted, null, 'stats: an empty game has no most-voted player');
+  eq(recapStats({}).rounds, 0, 'stats: an empty game reports zero rounds');
+
+  // recapText: a shareable summary carrying the key facts.
+  const txt = recapText(final);
+  ok(/Civilians win/.test(txt), 'text: names the winner');
+  ok(txt.includes('Coffee') && txt.includes('Tea'), 'text: reveals both words');
+  ok(/Bo — Civilian \(out R1\)/.test(txt), 'text: shows when a player was eliminated');
+  ok(/Ana — Civilian \(survived\)/.test(txt), 'text: marks survivors');
+  ok(/Dee — Mr\. White \(survived\)/.test(txt), 'text: includes Mr. White with no word');
+  ok(/2 rounds · 1\/2 impostors caught · most voted: Bo/.test(txt), 'text: appends the stats line');
+  ok(typeof recapText({}) === 'string', 'text: an empty game still yields a string');
 }
 
 // ===========================================================================
