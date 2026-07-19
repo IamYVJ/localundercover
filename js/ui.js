@@ -57,6 +57,71 @@ export function render(root, app, intents) {
   if (app.showRules) root.appendChild(rulesModal(intents));
   root.appendChild(peekOverlay(app));
   root.appendChild(toastEl(app));
+
+  // Tell screen readers what just changed (whose turn, vote, elimination, result).
+  announce(announcementFor(app));
+}
+
+// ---------------------------------------------------------------------------
+// Screen-reader announcements (aria-live)
+// ---------------------------------------------------------------------------
+// One visually-hidden polite live region, created once and kept OUTSIDE the
+// re-rendered root so it survives every clear()/rebuild — SRs only announce
+// changes to a region that stays in the DOM. render() recomputes a short
+// summary of the current phase each draw; announce() speaks it only when it
+// actually changes, so countdown ticks and re-renders don't cause chatter.
+let _liveRegion = null;
+let _lastAnnounce = '';
+
+function announce(msg) {
+  if (typeof document === 'undefined' || !msg || msg === _lastAnnounce) return;
+  _lastAnnounce = msg;
+  if (!_liveRegion) {
+    _liveRegion = el('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
+    document.body.appendChild(_liveRegion);
+  }
+  _liveRegion.textContent = msg;
+}
+
+// Pure map from game state to one screen-reader sentence (or '' for silence).
+// Exported for unit testing; keeps no DOM dependency so it runs under Node.
+export function announcementFor(app) {
+  if (!app || app.screen !== 'room' || !app.pub) return '';
+  const pub = app.pub;
+  const priv = app.priv;
+  const nameOf = (id) => {
+    const p = (pub.players || []).find((x) => x.id === id);
+    return p ? p.name : 'Someone';
+  };
+
+  switch (pub.phase) {
+    case PHASES.ROLE_REVEAL:
+      return 'Roles are dealt. Hold your card to reveal your secret word, then tap Ready.';
+    case PHASES.DESCRIBE:
+      if (priv && priv.isMyTurn) return 'Your turn to describe. Give one clue about your word.';
+      return `${nameOf(pub.describe && pub.describe.currentSpeakerId)}’s turn to describe.`;
+    case PHASES.VOTE:
+      return (pub.vote && pub.vote.isRunoff)
+        ? 'Runoff vote. Vote again between the tied players.'
+        : 'Time to vote. Choose one player to eliminate.';
+    case PHASES.REVEAL: {
+      const r = pub.reveal;
+      if (!r || r.type === 'none' || !r.eliminated) return 'The vote was tied. Nobody is eliminated this round.';
+      return `${r.eliminated.name} is out. They were ${describeRole(r.eliminated.role).name}.`;
+    }
+    case PHASES.WHITE_GUESS:
+      if (priv && priv.isGuesser) return 'Your last shot. Guess the civilians’ word to steal the win.';
+      return `${(pub.whiteGuess && pub.whiteGuess.whiteName) || 'Mr. White'} is guessing the civilians’ word.`;
+    case PHASES.GAMEOVER: {
+      const f = pub.final || {};
+      const title = f.winner === 'civilians' ? 'Civilians win'
+        : f.winner === 'mrwhite' ? 'Mr. White wins'
+        : 'Impostors win';
+      return f.reason ? `${title}. ${f.reason}` : `${title}.`;
+    }
+    default:
+      return '';
+  }
 }
 
 // ---------------------------------------------------------------------------

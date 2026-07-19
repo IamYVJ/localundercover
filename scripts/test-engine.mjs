@@ -4,9 +4,11 @@ import {
   MIN_PLAYERS, MAX_PLAYERS, ROLES, TIE_BREAK, TIMER,
   defaultRoleConfig, validateRoleConfig, maxUndercover, buildRoleDeck, shuffle,
   pickWordPair, assignWordPair, wordForRole, checkWinner, chooseStarter, wordsMatch, clampTimerSeconds,
+  describeRole,
 } from '../js/rules.js';
 import { GameEngine, PHASES } from '../js/state.js';
 import { MIXED } from '../js/words.js';
+import { announcementFor } from '../js/ui.js';
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.error('  ✗ ' + msg); } }
@@ -807,6 +809,53 @@ function firstCivAlive(g) { return g.alivePlayers().find((p) => p.roleId === ROL
   ok(g.kickPlayer(g.hostId, victim).ok, 'kick gameover: removal ok');
   eq(g.players.length, before - 1, 'kick gameover: seat freed after the game');
   eq(g.winner, 'civilians', 'kick gameover: the recorded winner is untouched');
+}
+
+// ===========================================================================
+// UI ANNOUNCEMENTS (aria-live) — pure phase→sentence map read by screen readers
+// ===========================================================================
+{
+  const A = (screen, pub, priv) => announcementFor({ screen, pub, priv });
+  const players = [{ id: 'p0', name: 'Ana' }, { id: 'p1', name: 'Bo' }];
+
+  // Silent outside an active round.
+  eq(A('home', null, null), '', 'announce: nothing off the room screen');
+  eq(A('room', { phase: PHASES.LOBBY, players }, null), '', 'announce: the lobby is silent');
+
+  ok(/reveal/i.test(A('room', { phase: PHASES.ROLE_REVEAL, players }, {})),
+     'announce: role reveal prompts you to reveal your word');
+
+  // Describe names the current speaker, or says "your turn" for the active player.
+  ok(/^Bo.s turn to describe\.$/.test(
+       A('room', { phase: PHASES.DESCRIBE, players, describe: { currentSpeakerId: 'p1' } }, { isMyTurn: false })),
+     'announce: describe names the current speaker');
+  ok(/your turn/i.test(
+       A('room', { phase: PHASES.DESCRIBE, players, describe: { currentSpeakerId: 'p0' } }, { isMyTurn: true })),
+     'announce: describe says "your turn" for the active player');
+
+  ok(/time to vote/i.test(A('room', { phase: PHASES.VOTE, players, vote: { isRunoff: false } }, null)),
+     'announce: vote phase');
+  ok(/runoff/i.test(A('room', { phase: PHASES.VOTE, players, vote: { isRunoff: true } }, null)),
+     'announce: runoff vote');
+
+  // Reveal names who left and their role (matching the on-screen copy).
+  const ucName = describeRole(ROLES.UNDERCOVER).name;
+  eq(A('room', { phase: PHASES.REVEAL, players, reveal: { type: 'elim', eliminated: { id: 'p1', name: 'Bo', role: ROLES.UNDERCOVER } } }, null),
+     `Bo is out. They were ${ucName}.`, 'announce: elimination names the player and role');
+  ok(/tied/i.test(A('room', { phase: PHASES.REVEAL, players, reveal: { type: 'none', eliminated: null } }, null)),
+     'announce: a tie means nobody is eliminated');
+
+  ok(/is guessing/i.test(A('room', { phase: PHASES.WHITE_GUESS, players, whiteGuess: { whiteName: 'Bo' } }, { isGuesser: false })),
+     'announce: bystanders hear that Mr. White is guessing');
+  ok(/last shot|steal/i.test(A('room', { phase: PHASES.WHITE_GUESS, players, whiteGuess: {} }, { isGuesser: true })),
+     'announce: the guesser gets their own prompt');
+
+  ok(/civilians win/i.test(A('room', { phase: PHASES.GAMEOVER, players, final: { winner: 'civilians', reason: 'All impostors are out.' } }, null)),
+     'announce: civilians win');
+  ok(/mr\. white wins/i.test(A('room', { phase: PHASES.GAMEOVER, players, final: { winner: 'mrwhite' } }, null)),
+     'announce: Mr. White wins');
+  ok(/impostors win/i.test(A('room', { phase: PHASES.GAMEOVER, players, final: { winner: 'undercover' } }, null)),
+     'announce: the undercover side wins');
 }
 
 // ===========================================================================
