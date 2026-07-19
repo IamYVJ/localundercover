@@ -52,6 +52,7 @@ const app = {
   nameInput: loadName(),
   codeInput: loadCode(),
   invited: false,        // arrived via an invite link (?code=…): show a 1-tap join
+  inviteServer: false,   // the invite link carried &s=1 → the room is server-hosted
   showRules: false,
 };
 
@@ -597,6 +598,7 @@ function resetToHome() {
   app.netNextRetryAt = 0;
   app.error = '';
   app.invited = false;        // clear the invite-landing state on a manual reset
+  app.inviteServer = false;
   draw();
 }
 
@@ -648,8 +650,11 @@ function doJoin() {
   saveCode(code);
   app.triedP2PFallback = false;
   // When a server is reachable, try it first; a "no room" answer falls back to
-  // peer-to-peer, so a single "Join" button reaches BOTH kinds of host.
-  if (app.serverAvailable) startServerJoin(code);
+  // peer-to-peer, so a single "Join" button reaches BOTH kinds of host. An
+  // invite that carried &s=1 also prefers the server even if this joiner's own
+  // health probe failed — the P2P fallback still covers a wrong/stale hint.
+  const preferServer = serverConfigured() && (app.serverAvailable || app.inviteServer);
+  if (preferServer) startServerJoin(code);
   else startJoin(code);
 }
 
@@ -659,9 +664,13 @@ async function copyCode() {
 }
 
 // A join link carries the room code so friends skip typing it: they land on
-// the home screen with the code pre-filled and just add their name.
+// the home screen with the code pre-filled and just add their name. Server
+// rooms add &s=1 so a joiner whose own health probe failed still tries the
+// server first (a wrong/stale hint self-corrects via the P2P fallback).
 function inviteLink(code) {
-  return location.origin + location.pathname + '?code=' + encodeURIComponent(code);
+  let url = location.origin + location.pathname + '?code=' + encodeURIComponent(code);
+  if (app.mode === 'server') url += '&s=1';
+  return url;
 }
 
 async function shareLink() {
@@ -676,19 +685,23 @@ async function shareLink() {
   showToast(ok ? 'Invite link copied' : url);
 }
 
-// Read a room code from ?code=… (or a #code=… / #CODE hash), then scrub it from
-// the address bar so a later "Create game" doesn't inherit a stale code.
-function readCodeFromUrl() {
+// Read a room code from ?code=… (or a #code=… / #CODE hash) plus the optional
+// &s=1 server hint, then scrub them from the address bar so a later "Create
+// game" doesn't inherit a stale code. The hint is only honoured from the query
+// string, never the hash. Returns { code, server }.
+function readInviteFromUrl() {
   try {
-    let raw = new URLSearchParams(location.search).get('code') || '';
+    const params = new URLSearchParams(location.search);
+    let raw = params.get('code') || '';
+    const server = params.get('s') === '1';
     if (!raw && location.hash) {
       const h = location.hash.slice(1);
       raw = h.startsWith('code=') ? h.slice(5) : h;
     }
     const code = normalizeCode(raw);
     if (code) { try { history.replaceState(null, '', location.pathname); } catch (_) {} }
-    return code;
-  } catch (_) { return ''; }
+    return { code, server: code ? server : false };
+  } catch (_) { return { code: '', server: false }; }
 }
 
 // ---------------------------------------------------------------------------
@@ -702,7 +715,7 @@ const intents = {
   join: doJoin,
   // Leave the invite-landing state so the manual "Join a game" card returns,
   // letting an invited user enter a different room code instead.
-  clearInvite: () => { app.invited = false; app.codeInput = ''; draw(); },
+  clearInvite: () => { app.invited = false; app.inviteServer = false; app.codeInput = ''; draw(); },
   goHome,
   leave,
   retryNow: () => {
@@ -810,8 +823,8 @@ function resumeOrHome() {
     startJoin(s.code);
     return;
   }
-  const linkCode = readCodeFromUrl();
-  if (linkCode) { app.codeInput = linkCode; app.invited = true; }
+  const invite = readInviteFromUrl();
+  if (invite.code) { app.codeInput = invite.code; app.invited = true; app.inviteServer = invite.server; }
   draw();
 }
 
