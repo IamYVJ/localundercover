@@ -14,7 +14,7 @@
 //     reachable for the first handshake — the SW can't make that work offline.
 // ============================================================================
 
-const VERSION = 'uc-v15';
+const VERSION = 'uc-v16';
 const CACHE = `localundercover-${VERSION}`;
 
 const SHELL = [
